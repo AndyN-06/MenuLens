@@ -1,0 +1,10 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.git
+**/node_modules
+menulens/frontend
+EasyOCR/.git
+EasyOCR/trainer
+EasyOCR/examples
+EasyOCR/unit_test

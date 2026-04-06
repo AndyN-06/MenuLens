@@ -1,0 +1,9 @@
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+requests==2.31.0
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+alembic==1.13.1
+openpyxl==3.1.2
+# easyocr is installed from local source (EasyOCR/) in the Dockerfile
