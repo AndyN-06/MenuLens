@@ -279,8 +279,13 @@ def _extract_dishes_from_chunk(
         f'"{restaurant_name}"\n'
         '- "cuisine_type" (string): cuisine type if visible, else '
         f'"{cuisine_type}"\n'
-        '- "dishes" (array): each item has dish_name, description, price, section '
-        "(all strings; use \"\" if unknown)\n\n"
+        '- "dishes" (array): each item must have:\n'
+        '    dish_name (string): the dish name\n'
+        '    description (string): the FULL description from the menu including '
+        'ingredients, preparation method, allergens, or any other printed details — '
+        'copy it verbatim; use "" only if nothing is printed\n'
+        '    price (string): price as printed, e.g. "$12.50"; use "" if not shown\n'
+        '    section (string): menu section header e.g. "Appetizers"; use "" if unknown\n\n'
         f"Menu text:\n{chunk}\n\n"
         "Return a JSON object only:"
     )

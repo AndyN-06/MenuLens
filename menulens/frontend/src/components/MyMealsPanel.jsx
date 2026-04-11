@@ -20,7 +20,7 @@ function RatingSlider({ label, value, onChange, max = 10 }) {
   )
 }
 
-function UnratedVisitCard({ visit, userId, onSave, onDiscard }) {
+function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
   const [name, setName]                       = useState(visit.restaurant_name || '')
   const [cuisine, setCuisine]                 = useState(visit.cuisine_type || '')
   const [restaurantRating, setRestaurantRating] = useState(0)
@@ -31,7 +31,7 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard }) {
   const handleSave = async () => {
     if (!name.trim()) return
     setSaving(true)
-    await onSave({
+    const saved = await onSave({
       _pendingId: visit.id,
       restaurant_name: name.trim(),
       cuisine_type: cuisine.trim() || null,
@@ -40,6 +40,7 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard }) {
       dish_rating: dishRating > 0 ? dishRating : null,
       source: 'manual',
     })
+    if (saved?.id) onVisitSaved(saved)
     setSaving(false)
   }
 
@@ -226,6 +227,10 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
     setHistory(prev => prev.filter(v => v.id !== visitId))
   }
 
+  const handleVisitSaved = (visit) => {
+    setHistory(prev => [visit, ...prev])
+  }
+
   const handleImportExcel = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -260,6 +265,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
     onRemovePending,
     onDeleteVisit: handleDeleteVisit,
     onImport: handleImportExcel,
+    onVisitSaved: handleVisitSaved,
   }
 
   // Inline mode: rendered inside the app shell as a screen
@@ -295,7 +301,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
   )
 }
 
-function PanelContent({ pendingVisits, history, loadingHistory, importLoading, importMsg, userId, onSaveVisit, onRemovePending, onDeleteVisit, onImport }) {
+function PanelContent({ pendingVisits, history, loadingHistory, importLoading, importMsg, userId, onSaveVisit, onRemovePending, onDeleteVisit, onImport, onVisitSaved }) {
   return (
     <>
       {pendingVisits.length > 0 && (
@@ -308,6 +314,7 @@ function PanelContent({ pendingVisits, history, loadingHistory, importLoading, i
               userId={userId}
               onSave={onSaveVisit}
               onDiscard={onRemovePending}
+              onVisitSaved={onVisitSaved}
             />
           ))}
         </section>

@@ -1,3 +1,19 @@
+function CommunityPill() {
+  return (
+    <span style={{
+      fontSize: '0.7rem',
+      fontWeight: 600,
+      color: 'var(--amber)',
+      backgroundColor: 'var(--amber-tint)',
+      borderRadius: '999px',
+      padding: '0.1rem 0.5rem',
+      whiteSpace: 'nowrap',
+    }}>
+      Popular here
+    </span>
+  )
+}
+
 function MatchPill({ level }) {
   const config = {
     great: { label: 'Great match', cls: 'badge-green' },
@@ -37,6 +53,7 @@ function DishCard({ dish, ranked }) {
               {dish.dish_name}
             </span>
             {ranked && <MatchPill level={dish.match_level} />}
+            {dish.community_pick && <CommunityPill />}
           </div>
           {dish.description && (
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 0 }}>

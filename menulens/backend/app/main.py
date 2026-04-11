@@ -443,18 +443,76 @@ def delete_visit(user_id: str, visit_id: str, db: Session = Depends(get_db)):
 
 # ── Recommend — instant formula scoring ──────────────────────────────────────
 
+def _get_community_favorites(
+    db: Session,
+    restaurant_name: str,
+    exclude_user_id: uuid.UUID | None = None,
+    min_dish_rating: int = 7,
+    fuzzy_threshold: float = 0.70,
+) -> list[str]:
+    """Return favorite dish names rated highly by other users at the same restaurant."""
+    from difflib import SequenceMatcher
+
+    rows = (
+        db.query(RestaurantVisit.favorite_dish)
+        .filter(
+            RestaurantVisit.dish_rating >= min_dish_rating,
+            RestaurantVisit.favorite_dish.isnot(None),
+        )
+        .all()
+    )
+    if not rows:
+        return []
+
+    # We need the restaurant_name too for fuzzy matching — re-query with it
+    rows_full = (
+        db.query(RestaurantVisit.restaurant_name, RestaurantVisit.favorite_dish)
+        .filter(
+            RestaurantVisit.dish_rating >= min_dish_rating,
+            RestaurantVisit.favorite_dish.isnot(None),
+        )
+    )
+    if exclude_user_id:
+        rows_full = rows_full.filter(RestaurantVisit.user_id != exclude_user_id)
+    rows_full = rows_full.all()
+
+    name_lower = restaurant_name.lower()
+    favorites: list[str] = []
+    for row_name, dish in rows_full:
+        ratio = SequenceMatcher(None, (row_name or "").lower(), name_lower).ratio()
+        if ratio >= fuzzy_threshold and dish:
+            favorites.append(dish)
+
+    logger.info(
+        f"[rank] community favorites for '{restaurant_name}': {favorites or 'none'}"
+    )
+    return favorites
+
+
 @app.post("/api/recommend/rank")
 def rank_endpoint(payload: RankRequest, db: Session = Depends(get_db)):
     """Apply formula-based scoring to a pre-parsed dish list."""
+    # Fetch community favorites regardless of whether the user has a profile
+    uid: uuid.UUID | None = None
     if payload.user_id:
         try:
             uid = uuid.UUID(payload.user_id)
+        except ValueError:
+            pass
+
+    community_favorites = _get_community_favorites(
+        db, payload.restaurant_name, exclude_user_id=uid
+    )
+
+    if uid:
+        try:
             profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
             if profile:
                 scored = score_dishes(
                     payload.dishes,
                     _profile_to_dict(profile),
                     payload.cuisine_type,
+                    community_favorites=community_favorites,
                 )
                 return {
                     "ranked": True,
@@ -462,16 +520,32 @@ def rank_endpoint(payload: RankRequest, db: Session = Depends(get_db)):
                     "cuisine_type": payload.cuisine_type,
                     "dish_count": len(scored),
                     "dishes": scored,
+                    "community_count": len(community_favorites),
                 }
         except Exception as e:
             logger.warning(f"Ranking failed: {e}")
+
+    # No profile — still apply community picks if any
+    if community_favorites:
+        from difflib import SequenceMatcher
+        dishes_out = []
+        for dish in payload.dishes:
+            name = dish.get("dish_name", "")
+            is_pick = any(
+                SequenceMatcher(None, name.lower(), cf.lower()).ratio() > 0.6
+                for cf in community_favorites
+            )
+            dishes_out.append({**dish, "community_pick": is_pick})
+    else:
+        dishes_out = payload.dishes
 
     return {
         "ranked": False,
         "restaurant_name": payload.restaurant_name,
         "cuisine_type": payload.cuisine_type,
-        "dish_count": len(payload.dishes),
-        "dishes": payload.dishes,
+        "dish_count": len(dishes_out),
+        "dishes": dishes_out,
+        "community_count": len(community_favorites),
     }
 
 
@@ -585,6 +659,22 @@ async def recommend_stream(
                 _sse({"type": "log", "message": f"[OCR] Extracted {len(lines)} lines"})
                 for i, line in enumerate(lines, 1):
                     _sse({"type": "log", "message": f"[OCR]  {i:>3}: {line}"})
+
+                # ── Debug: emit raw OCR text ──────────────────────────────────
+                _sse({"type": "debug_ocr", "text": raw_text})
+
+                # ── Debug: emit first LLM prompt (mirrors _clean_ocr_text) ───
+                first_llm_input = (
+                    "SYSTEM: You are an OCR correction assistant. Fix garbled characters, "
+                    "merge broken words, and return clean readable menu text preserving all "
+                    "sections, dish names, descriptions, and prices. Return ONLY the corrected "
+                    "plain text.\n\n"
+                    "USER: Clean up this raw OCR menu text. Fix errors, merge split words, "
+                    "keep all dish names, prices, and section headers. Return only the "
+                    "corrected plain text:\n\n"
+                    f"{raw_text}"
+                )
+                _sse({"type": "debug_llm_input", "text": first_llm_input})
 
                 # ── LLM parse ────────────────────────────────────────────────
                 _sse({"type": "log", "message": "[LLM] Parsing menu..."})

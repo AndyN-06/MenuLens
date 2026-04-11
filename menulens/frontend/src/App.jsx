@@ -5,6 +5,7 @@ import Onboarding from './components/Onboarding'
 import ProcessingLog from './components/ProcessingLog'
 import Login from './components/Login'
 import MyMealsPanel from './components/MyMealsPanel'
+import DebugPanel from './components/DebugPanel'
 
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
@@ -148,6 +149,10 @@ function App() {
   const [confirmedCuisine, setConfirmedCuisine] = useState('')
   const [ranking, setRanking] = useState(false)
 
+  const [debugOcr, setDebugOcr] = useState('')
+  const [debugLlmInput, setDebugLlmInput] = useState('')
+  const [debugRecommendation, setDebugRecommendation] = useState('')
+
   useEffect(() => {
     const storedId   = localStorage.getItem('menulens_user_id')
     const storedName = localStorage.getItem('menulens_username')
@@ -189,6 +194,9 @@ function App() {
     setResult(null)
     setLogs([])
     parsedRef.current = null
+    setDebugOcr('')
+    setDebugLlmInput('')
+    setDebugRecommendation('')
 
     try {
       const formData = new FormData()
@@ -227,6 +235,10 @@ function App() {
           if (event.type === 'heartbeat') continue
           if (event.type === 'log') {
             setLogs(prev => [...prev, event.message])
+          } else if (event.type === 'debug_ocr') {
+            setDebugOcr(event.text)
+          } else if (event.type === 'debug_llm_input') {
+            setDebugLlmInput(event.text)
           } else if (event.type === 'parsed') {
             gotParsed = true
             parsedRef.current = event.data
@@ -266,6 +278,7 @@ function App() {
       if (!res.ok) throw new Error('Ranking failed')
       const data = await res.json()
       setResult(data)
+      setDebugRecommendation(JSON.stringify(data, null, 2))
       setStage('done')
 
       const visit = {
@@ -291,18 +304,23 @@ function App() {
     setError(null)
     setLogs([])
     parsedRef.current = null
+    setDebugOcr('')
+    setDebugLlmInput('')
+    setDebugRecommendation('')
   }
 
   const handleSaveVisit = async (visitData) => {
     try {
-      await fetch(`/api/visits/${userId}`, {
+      const res = await fetch(`/api/visits/${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(visitData),
       })
+      const saved = await res.json()
       const updated = pendingVisits.filter(v => v.id !== visitData._pendingId)
       setPendingVisits(updated)
       savePendingVisits(updated)
+      return saved
     } catch (err) {
       console.error('Failed to save visit:', err)
     }
@@ -441,6 +459,13 @@ function App() {
             <DishCards data={result} />
           </div>
         )}
+
+        {/* Debug panel — persists until next upload */}
+        <DebugPanel
+          ocrText={debugOcr}
+          llmInput={debugLlmInput}
+          recommendation={debugRecommendation}
+        />
       </div>
 
       <BottomNav activeTab={activeTab} onTabChange={setActiveTab} pendingCount={pendingVisits.length} />
