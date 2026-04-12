@@ -1,22 +1,21 @@
 """
-OCR test script — runs EasyOCR on an image and writes the extracted text to an
-incrementing output file (ocr_output_1.txt, ocr_output_2.txt, ...) so previous
-results are never overwritten.
+OCR test script — runs the experimental ocr.py on an image and writes the
+extracted text to an incrementing output file (ocr_output_1.txt, ...) so
+previous results are never overwritten.
 
 Usage:
     python run_ocr.py <image_path>
 
 Example:
-    python run_ocr.py ../Images/menu.jpg
+    python run_ocr.py ../../Images/menu.jpg
 """
 
 import sys
 import os
 
-# ---------------------------------------------------------------------------
-# EasyOCR settings (mirrors the backend's ocr.py exactly)
-# ---------------------------------------------------------------------------
-CONFIDENCE_THRESHOLD = 0.3
+# Use the local experimental ocr.py
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ocr import extract_text_from_image
 
 
 def next_output_path(directory: str) -> str:
@@ -30,32 +29,11 @@ def next_output_path(directory: str) -> str:
 
 
 def run_ocr(image_path: str) -> str:
-    """Load EasyOCR and extract text from *image_path*."""
+    """Run the experimental OCR on *image_path*."""
     print("Loading EasyOCR reader (first run downloads models, may take a moment)...")
-    import easyocr
-    reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-
-    print(f"Running OCR on: {image_path}")
-    results = reader.readtext(
-        image_path,
-        paragraph=False,
-        text_threshold=0.5,
-        low_text=0.3,
-        width_ths=0.7,
-        add_margin=0.1,
-        mag_ratio=1.5,
-        adjust_contrast=0.5,
-        contrast_ths=0.1,
-    )
-
-    lines = []
-    for (bbox, text, confidence) in results:
-        status = "ok" if confidence >= CONFIDENCE_THRESHOLD else "low-conf"
-        print(f"  [{confidence:.2f}] ({status}) {text!r}")
-        if confidence >= CONFIDENCE_THRESHOLD:
-            lines.append(text)
-
-    return '\n'.join(lines)
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    return extract_text_from_image(image_data)
 
 
 def main():
@@ -69,21 +47,21 @@ def main():
         print(f"Error: file not found: {image_path}")
         sys.exit(1)
 
+    print(f"Running OCR on: {image_path}")
     extracted = run_ocr(image_path)
 
-    # Write to the next available output file in the same directory as this script
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_path = next_output_path(script_dir)
 
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(f"Source image: {os.path.abspath(image_path)}\n")
         f.write(f"{'=' * 60}\n\n")
         f.write(extracted)
-        f.write('\n')
+        f.write("\n")
 
-    print(f"\nExtracted text written to: {output_path}")
+    print(f"Extracted text written to: {output_path}")
     print(f"Total lines captured: {len(extracted.splitlines())}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
