@@ -4,46 +4,45 @@ MenuLens FastAPI Backend
 from contextlib import asynccontextmanager
 from io import BytesIO
 import asyncio
+import json as _json
 import uuid
 import logging
 import traceback
 from typing import Optional
-
-import json as _json
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
-from .ocr import extract_text_from_image
-from .llm import parse_menu_text, health_check_ollama, summarize_taste_profile
-from .scoring import score_dishes
 from sqlalchemy import text
-from .database import get_db, engine
-from .models import User, TasteProfile, RestaurantVisit, Base
+
+from .llm import (
+    parse_menu_image,
+    health_check_anthropic,
+    summarize_taste_profile,
+    _get_client,
+    _extract_json,
+    ANTHROPIC_MODEL,
+)
+from .scoring import score_dishes
+from .database import get_db, engine, SessionLocal
+from .models import (
+    Base, User, TasteProfile, RestaurantVisit,
+    Restaurant, Menu, Dish, DishRating,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def _warmup_ocr():
-    """Initialize the EasyOCR singleton before the first request arrives."""
-    try:
-        from .ocr import _get_reader
-        logger.info("Pre-warming EasyOCR reader...")
-        _get_reader()
-        logger.info("EasyOCR reader ready.")
-    except Exception as e:
-        logger.warning(f"OCR warmup failed (non-fatal): {e}")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Create all ORM-defined tables (new tables are created idempotently)
     Base.metadata.create_all(bind=engine)
-    # Idempotent column migrations — safe to run on every startup
+
     with engine.connect() as conn:
+        # ── Existing-table column additions ──────────────────────────────────
         conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(100)"
         ))
@@ -56,13 +55,41 @@ async def lifespan(app: FastAPI):
         conn.execute(text(
             "ALTER TABLE taste_profiles ADD COLUMN IF NOT EXISTS avg_score_threshold FLOAT"
         ))
+        conn.execute(text(
+            "ALTER TABLE taste_profiles ADD COLUMN IF NOT EXISTS cuisine_profiles JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE taste_profiles ADD COLUMN IF NOT EXISTS liked_ingredients JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE taste_profiles ADD COLUMN IF NOT EXISTS disliked_ingredients JSONB"
+        ))
+
+        # ── restaurant_visits: add FK columns, make restaurant_name nullable ─
+        conn.execute(text(
+            "ALTER TABLE restaurant_visits "
+            "ADD COLUMN IF NOT EXISTS restaurant_id UUID REFERENCES restaurants(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE restaurant_visits "
+            "ADD COLUMN IF NOT EXISTS menu_id UUID REFERENCES menus(id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE restaurant_visits "
+            "ALTER COLUMN restaurant_name DROP NOT NULL"
+        ))
+
+        # ── GIN index on restaurants.name for fast prefix search ─────────────
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_restaurants_name "
+            "ON restaurants (name)"
+        ))
+
         conn.commit()
-    loop = asyncio.get_event_loop()
-    asyncio.ensure_future(loop.run_in_executor(None, _warmup_ocr))
     yield
 
 
-app = FastAPI(title="MenuLens API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="MenuLens API", version="4.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,12 +123,27 @@ class LoginRequest(BaseModel):
 
 
 class VisitCreate(BaseModel):
-    restaurant_name: str
+    restaurant_id: Optional[str] = None
+    restaurant_name: Optional[str] = None   # fallback if no restaurant_id
     cuisine_type: Optional[str] = None
     restaurant_rating: Optional[int] = None
-    favorite_dish: Optional[str] = None
-    dish_rating: Optional[int] = None
+    menu_id: Optional[str] = None
     source: str = "manual"
+
+
+class RestaurantCreate(BaseModel):
+    name: str
+    cuisine_type: Optional[str] = None
+    city: Optional[str] = None
+
+
+class DishRatingCreate(BaseModel):
+    dish_id: str
+    rating: int   # 1-10
+
+
+class DishRatingsPayload(BaseModel):
+    ratings: list[DishRatingCreate]
 
 
 class RankRequest(BaseModel):
@@ -125,6 +167,9 @@ def _profile_to_dict(p: TasteProfile) -> dict:
         "id": str(p.id),
         "user_id": str(p.user_id),
         "cuisine_affinities": p.cuisine_affinities or {},
+        "cuisine_profiles": p.cuisine_profiles or {},
+        "liked_ingredients": p.liked_ingredients or {},
+        "disliked_ingredients": p.disliked_ingredients or {},
         "flavor_tags": p.flavor_tags or [],
         "disliked_tags": p.disliked_tags or [],
         "dietary_restrictions": p.dietary_restrictions or [],
@@ -139,6 +184,8 @@ def _visit_to_dict(v: RestaurantVisit) -> dict:
     return {
         "id": str(v.id),
         "user_id": str(v.user_id),
+        "restaurant_id": str(v.restaurant_id) if v.restaurant_id else None,
+        "menu_id": str(v.menu_id) if v.menu_id else None,
         "restaurant_name": v.restaurant_name,
         "cuisine_type": v.cuisine_type,
         "restaurant_rating": v.restaurant_rating,
@@ -149,44 +196,219 @@ def _visit_to_dict(v: RestaurantVisit) -> dict:
     }
 
 
-def recompute_profile(db: Session, user_id: uuid.UUID) -> TasteProfile:
-    """Re-derive TasteProfile fields from all RestaurantVisit rows for this user."""
-    visits = (
-        db.query(RestaurantVisit)
-        .filter(RestaurantVisit.user_id == user_id)
-        .all()
-    )
+def _dish_to_dict(d: Dish) -> dict:
+    return {
+        "id": str(d.id),
+        "menu_id": str(d.menu_id),
+        "restaurant_id": str(d.restaurant_id),
+        "dish_name": d.dish_name,
+        "description": d.description or "",
+        "price": d.price or "",
+        "section": d.section or "",
+        "flavor_vector": d.flavor_vector,
+        "base_ingredients": d.base_ingredients or [],
+        "flavor_source": d.flavor_source,
+        "flavor_confidence": d.flavor_confidence,
+    }
 
-    # cuisine_affinities: mean restaurant_rating per cuisine, normalised to 0–1
+
+def _upsert_menu(
+    db: Session,
+    restaurant_id: uuid.UUID,
+    parsed: dict,
+    scanned_by: uuid.UUID | None,
+) -> Menu:
+    """Replace the existing menu for a restaurant with freshly scanned dishes."""
+    existing = db.query(Menu).filter(Menu.restaurant_id == restaurant_id).first()
+    if existing:
+        db.delete(existing)
+        db.flush()
+
+    menu = Menu(
+        id=uuid.uuid4(),
+        restaurant_id=restaurant_id,
+        scanned_by=scanned_by,
+        verified=False,
+        dish_count=len(parsed.get("dishes", [])),
+        raw_response=parsed,
+    )
+    db.add(menu)
+    db.flush()
+
+    for d in parsed.get("dishes", []):
+        dish = Dish(
+            id=uuid.uuid4(),
+            menu_id=menu.id,
+            restaurant_id=restaurant_id,
+            dish_name=d.get("dish_name", ""),
+            description=d.get("description", ""),
+            price=d.get("price", ""),
+            section=d.get("section", ""),
+        )
+        db.add(dish)
+
+    # Update restaurant cuisine_type if scan inferred one and it wasn't set
+    if parsed.get("cuisine_type"):
+        restaurant = db.query(Restaurant).filter(Restaurant.id == restaurant_id).first()
+        if restaurant and not restaurant.cuisine_type:
+            restaurant.cuisine_type = parsed["cuisine_type"]
+
+    db.commit()
+    db.refresh(menu)
+    return menu
+
+
+def _enrich_dish_flavors(menu_id: uuid.UUID):
+    """Background job: generate flavor vectors for dishes that don't have them yet.
+
+    Uses a single Claude API call for all dishes in the menu.
+    Writes results back to the dishes table with flavor_source='llm', confidence=0.7.
+    Does not block the scan response.
+    """
+    import json as _stdlib_json
+
+    db = SessionLocal()
+    try:
+        dishes = db.query(Dish).filter(
+            Dish.menu_id == menu_id,
+            Dish.flavor_source == "none",
+        ).all()
+
+        if not dishes:
+            return
+
+        dish_list = [
+            {"id": str(d.id), "dish_name": d.dish_name, "description": d.description or ""}
+            for d in dishes
+        ]
+
+        response = _get_client().messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "For each dish below, estimate its flavor profile and main ingredients.\n"
+                    "Return ONLY a JSON array where each element has:\n"
+                    '  "id": (the dish id provided)\n'
+                    '  "flavor_vector": {"umami": 0-10, "salty": 0-10, "sweet": 0-10, '
+                    '"bitter": 0-10, "sour": 0-10, "spicy": 0-10, "richness": 0-10}\n'
+                    '  "base_ingredients": ["ingredient1", "ingredient2", ...]\n\n'
+                    f"Dishes:\n{_stdlib_json.dumps(dish_list, indent=2)}"
+                ),
+            }],
+        )
+
+        results = _extract_json(response.content[0].text)
+        if not isinstance(results, list):
+            return
+
+        result_map = {r["id"]: r for r in results if "id" in r}
+        for dish in dishes:
+            r = result_map.get(str(dish.id))
+            if not r:
+                continue
+            dish.flavor_vector     = r.get("flavor_vector")
+            dish.base_ingredients  = r.get("base_ingredients", [])
+            dish.flavor_source     = "llm"
+            dish.flavor_confidence = 0.7
+
+        db.commit()
+        logger.info(
+            f"[enrich] flavor vectors written for {len(result_map)} dishes in menu {menu_id}"
+        )
+
+    except Exception as exc:
+        logger.error(f"[enrich] flavor enrichment failed for menu {menu_id}: {exc}")
+    finally:
+        db.close()
+
+
+def recompute_profile(db: Session, user_id: uuid.UUID) -> TasteProfile:
+    """Re-derive TasteProfile fields from RestaurantVisit and DishRating rows."""
+    visits           = db.query(RestaurantVisit).filter(RestaurantVisit.user_id == user_id).all()
+    dish_ratings_rows = db.query(DishRating).filter(DishRating.user_id == user_id).all()
+
+    # cuisine_affinities: mean restaurant_rating per cuisine, normalised to 0-1
     cuisine_ratings: dict[str, list[float]] = {}
     for v in visits:
-        if v.cuisine_type and v.restaurant_rating is not None:
-            cuisine_ratings.setdefault(v.cuisine_type, []).append(float(v.restaurant_rating))
+        cuisine = v.cuisine_type or (v.restaurant.cuisine_type if v.restaurant else None)
+        if cuisine and v.restaurant_rating is not None:
+            cuisine_ratings.setdefault(cuisine, []).append(float(v.restaurant_rating))
     cuisine_affinities = {
         c: round(sum(rs) / len(rs) / 10.0, 3)
         for c, rs in cuisine_ratings.items()
     }
 
-    # top_dishes: favorite_dish where dish_rating >= 7
-    top_dishes = [
-        v.favorite_dish for v in visits
-        if v.favorite_dish and v.dish_rating is not None and v.dish_rating >= 7
-    ]
+    # top_dishes and avg_score_threshold from dish_ratings (new) + legacy visit fields
+    top_dishes   = []
+    all_ratings  = []
+    for dr in dish_ratings_rows:
+        all_ratings.append(float(dr.rating))
+        if dr.rating >= 7 and dr.dish and dr.dish.dish_name:
+            top_dishes.append(dr.dish.dish_name)
+    # also include legacy favorite_dish from old visits
+    for v in visits:
+        if v.favorite_dish and v.dish_rating is not None:
+            if v.dish_rating >= 7:
+                top_dishes.append(v.favorite_dish)
+            all_ratings.append(float(v.dish_rating))
+    avg_score_threshold = round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 5.0
 
-    # avg_score_threshold: mean of all dish_ratings (or 5.0 default)
-    dish_ratings = [float(v.dish_rating) for v in visits if v.dish_rating is not None]
-    avg_score_threshold = round(sum(dish_ratings) / len(dish_ratings), 2) if dish_ratings else 5.0
+    # liked/disliked ingredients from dish_ratings joined with dish.base_ingredients
+    liked_ingredients:    dict[str, float] = {}
+    disliked_ingredients: dict[str, float] = {}
+    for dr in dish_ratings_rows:
+        if not dr.dish or not dr.dish.base_ingredients:
+            continue
+        ingredients = dr.dish.base_ingredients or []
+        if dr.rating >= 7:
+            for ing in ingredients:
+                liked_ingredients[ing] = liked_ingredients.get(ing, 0) + 1
+        elif dr.rating <= 4:
+            for ing in ingredients:
+                disliked_ingredients[ing] = disliked_ingredients.get(ing, 0) + 1
+
+    max_liked    = max(liked_ingredients.values(), default=1)
+    max_disliked = max(disliked_ingredients.values(), default=1)
+    liked_ingredients    = {k: round(v / max_liked,    3) for k, v in liked_ingredients.items()}
+    disliked_ingredients = {k: round(v / max_disliked, 3) for k, v in disliked_ingredients.items()}
+
+    # cuisine_profiles: per cuisine x section, built from dish_ratings with flavor vectors
+    cuisine_profiles: dict = {}
+    for dr in dish_ratings_rows:
+        if not dr.dish or not dr.dish.flavor_vector or dr.dish.flavor_confidence == 0:
+            continue
+        cuisine = (
+            dr.dish.restaurant.cuisine_type if dr.dish.restaurant else None
+        ) or "unknown"
+        section   = (dr.dish.section or "mains").lower()
+        direction = 1 if dr.rating >= 7 else (-1 if dr.rating <= 4 else 0)
+        if direction == 0:
+            continue
+        fv = dr.dish.flavor_vector
+        cuisine_profiles.setdefault(cuisine, {}).setdefault(section, {})
+        current = cuisine_profiles[cuisine][section]
+        lr = 0.1
+        for flavor, value in fv.items():
+            current[flavor] = current.get(flavor, value) + direction * lr * (value - current.get(flavor, value))
 
     profile = db.query(TasteProfile).filter(TasteProfile.user_id == user_id).first()
     if profile:
-        profile.cuisine_affinities = cuisine_affinities
-        profile.top_dishes = top_dishes
-        profile.avg_score_threshold = avg_score_threshold
+        profile.cuisine_affinities   = cuisine_affinities
+        profile.cuisine_profiles     = cuisine_profiles
+        profile.liked_ingredients    = liked_ingredients
+        profile.disliked_ingredients = disliked_ingredients
+        profile.top_dishes           = top_dishes
+        profile.avg_score_threshold  = avg_score_threshold
     else:
         profile = TasteProfile(
             id=uuid.uuid4(),
             user_id=user_id,
             cuisine_affinities=cuisine_affinities,
+            cuisine_profiles=cuisine_profiles,
+            liked_ingredients=liked_ingredients,
+            disliked_ingredients=disliked_ingredients,
             top_dishes=top_dishes,
             avg_score_threshold=avg_score_threshold,
             flavor_tags=[],
@@ -210,15 +432,13 @@ async def health_check():
 
 @app.get("/health/llm")
 async def health_llm():
-    result = health_check_ollama()
+    result = health_check_anthropic()
     if result["status"] == "error":
         raise HTTPException(status_code=503, detail=result)
-    if result["status"] == "model_not_pulled":
-        raise HTTPException(status_code=424, detail=result)
     return result
 
 
-# ── OCR — debug endpoint ──────────────────────────────────────────────────────
+# ── OCR/Parse — debug endpoints ───────────────────────────────────────────────
 
 @app.post("/api/ocr")
 async def ocr_endpoint(file: UploadFile = File(...)):
@@ -227,10 +447,11 @@ async def ocr_endpoint(file: UploadFile = File(...)):
     try:
         image_data = await file.read()
         logger.info(f"[OCR] processing {file.filename} ({len(image_data):,} bytes)")
-        raw_text = extract_text_from_image(image_data)
-        lines = [l for l in raw_text.splitlines() if l.strip()]
-        logger.info(f"[OCR] extracted {len(lines)} lines from {file.filename}")
-        return {"filename": file.filename, "text": raw_text, "char_count": len(raw_text)}
+        parsed = parse_menu_image(image_data)
+        # Return dish names as plain text for backward compat with debug tooling
+        lines = [d.get("dish_name", "") for d in parsed.get("dishes", [])]
+        text  = "\n".join(lines)
+        return {"filename": file.filename, "text": text, "char_count": len(text)}
     except HTTPException:
         raise
     except Exception as e:
@@ -238,16 +459,13 @@ async def ocr_endpoint(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Parse — debug endpoint ────────────────────────────────────────────────────
-
 @app.post("/api/parse")
 async def parse_endpoint(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     try:
         image_data = await file.read()
-        raw_text = extract_text_from_image(image_data)
-        parsed = parse_menu_text(raw_text)
+        parsed = parse_menu_image(image_data)
         return {
             "filename": file.filename,
             "dish_count": len(parsed.get("dishes", [])),
@@ -291,11 +509,87 @@ def create_user(db: Session = Depends(get_db)):
     return {"user_id": str(user.id)}
 
 
+# ── Restaurants ───────────────────────────────────────────────────────────────
+
+@app.get("/api/restaurants/search")
+def search_restaurants(q: str, limit: int = 10, db: Session = Depends(get_db)):
+    if not q or len(q.strip()) < 2:
+        return []
+    results = (
+        db.query(Restaurant)
+        .filter(Restaurant.name.ilike(f"%{q.strip()}%"))
+        .order_by(Restaurant.name)
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": str(r.id),
+            "name": r.name,
+            "cuisine_type": r.cuisine_type,
+            "city": r.city,
+            "has_menu": r.menu is not None,
+            "menu_verified": r.menu.verified if r.menu else False,
+            "menu_dish_count": r.menu.dish_count if r.menu else 0,
+            "menu_scanned_at": r.menu.scanned_at.isoformat() if r.menu else None,
+        }
+        for r in results
+    ]
+
+
+@app.post("/api/restaurants", status_code=201)
+def create_restaurant(payload: RestaurantCreate, db: Session = Depends(get_db)):
+    restaurant = Restaurant(
+        id=uuid.uuid4(),
+        name=payload.name.strip(),
+        cuisine_type=payload.cuisine_type,
+        city=payload.city,
+    )
+    db.add(restaurant)
+    db.commit()
+    db.refresh(restaurant)
+    return {"id": str(restaurant.id), "name": restaurant.name}
+
+
+@app.get("/api/restaurants/{restaurant_id}/menu")
+def get_restaurant_menu(restaurant_id: str, db: Session = Depends(get_db)):
+    rid  = _parse_uuid(restaurant_id)
+    menu = db.query(Menu).filter(Menu.restaurant_id == rid).first()
+    if not menu:
+        raise HTTPException(status_code=404, detail="No menu scanned for this restaurant")
+    dishes = db.query(Dish).filter(Dish.menu_id == menu.id).all()
+    return {
+        "menu_id": str(menu.id),
+        "restaurant_id": str(menu.restaurant_id),
+        "scanned_at": menu.scanned_at.isoformat(),
+        "verified": menu.verified,
+        "dish_count": menu.dish_count,
+        "dishes": [_dish_to_dict(d) for d in dishes],
+    }
+
+
+@app.post("/api/restaurants/{restaurant_id}/menu/verify")
+def verify_menu(
+    restaurant_id: str,
+    user_id: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    rid  = _parse_uuid(restaurant_id)
+    uid  = _parse_uuid(user_id)
+    menu = db.query(Menu).filter(Menu.restaurant_id == rid).first()
+    if not menu:
+        raise HTTPException(status_code=404, detail="No menu found")
+    menu.verified    = True
+    menu.verified_by = uid
+    db.commit()
+    return {"verified": True}
+
+
 # ── Profile ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/profile/{user_id}")
 def get_profile(user_id: str, db: Session = Depends(get_db)):
-    uid = _parse_uuid(user_id)
+    uid     = _parse_uuid(user_id)
     profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -308,18 +602,18 @@ def create_or_replace_profile(
     payload: TasteProfileCreate,
     db: Session = Depends(get_db),
 ):
-    uid = _parse_uuid(user_id)
+    uid  = _parse_uuid(user_id)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
     if profile:
-        profile.cuisine_affinities = payload.cuisine_affinities
-        profile.flavor_tags = payload.flavor_tags
-        profile.disliked_tags = payload.disliked_tags
+        profile.cuisine_affinities  = payload.cuisine_affinities
+        profile.flavor_tags         = payload.flavor_tags
+        profile.disliked_tags       = payload.disliked_tags
         profile.dietary_restrictions = payload.dietary_restrictions
-        profile.rated_dishes = payload.rated_dishes
+        profile.rated_dishes        = payload.rated_dishes
     else:
         profile = TasteProfile(
             id=uuid.uuid4(),
@@ -343,7 +637,7 @@ def patch_profile(
     payload: TasteProfilePatch,
     db: Session = Depends(get_db),
 ):
-    uid = _parse_uuid(user_id)
+    uid     = _parse_uuid(user_id)
     profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -374,7 +668,7 @@ def patch_profile(
 
 @app.post("/api/profile/{user_id}/recompute")
 def recompute_endpoint(user_id: str, db: Session = Depends(get_db)):
-    uid = _parse_uuid(user_id)
+    uid     = _parse_uuid(user_id)
     profile = recompute_profile(db, uid)
     return _profile_to_dict(profile)
 
@@ -383,7 +677,7 @@ def recompute_endpoint(user_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/visits/{user_id}")
 def get_visits(user_id: str, db: Session = Depends(get_db)):
-    uid = _parse_uuid(user_id)
+    uid    = _parse_uuid(user_id)
     visits = (
         db.query(RestaurantVisit)
         .filter(RestaurantVisit.user_id == uid)
@@ -399,35 +693,110 @@ def create_visit(
     payload: VisitCreate,
     db: Session = Depends(get_db),
 ):
-    uid = _parse_uuid(user_id)
+    uid  = _parse_uuid(user_id)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    rid = _parse_uuid(payload.restaurant_id) if payload.restaurant_id else None
+    mid = _parse_uuid(payload.menu_id)       if payload.menu_id       else None
+
+    # Resolve restaurant_name from Restaurant record if not supplied
+    resolved_name = payload.restaurant_name
+    if rid and not resolved_name:
+        r = db.query(Restaurant).filter(Restaurant.id == rid).first()
+        if r:
+            resolved_name = r.name
+
     visit = RestaurantVisit(
         id=uuid.uuid4(),
         user_id=uid,
-        restaurant_name=payload.restaurant_name,
+        restaurant_id=rid,
+        menu_id=mid,
+        restaurant_name=resolved_name,
         cuisine_type=payload.cuisine_type,
         restaurant_rating=payload.restaurant_rating,
-        favorite_dish=payload.favorite_dish,
-        dish_rating=payload.dish_rating,
         source=payload.source,
     )
     db.add(visit)
     db.commit()
     db.refresh(visit)
 
-    # Recompute profile after every new visit
     recompute_profile(db, uid)
 
     return _visit_to_dict(visit)
 
 
-@app.delete("/api/visits/{user_id}/{visit_id}", status_code=204)
-def delete_visit(user_id: str, visit_id: str, db: Session = Depends(get_db)):
+@app.post("/api/visits/{user_id}/{visit_id}/dishes")
+def rate_dishes(
+    user_id: str,
+    visit_id: str,
+    payload: DishRatingsPayload,
+    db: Session = Depends(get_db),
+):
     uid = _parse_uuid(user_id)
     vid = _parse_uuid(visit_id)
+
+    visit = db.query(RestaurantVisit).filter(
+        RestaurantVisit.id == vid,
+        RestaurantVisit.user_id == uid,
+    ).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    for r in payload.ratings:
+        did  = _parse_uuid(r.dish_id)
+        dish = db.query(Dish).filter(Dish.id == did).first()
+        if not dish:
+            continue
+        rating = DishRating(
+            id=uuid.uuid4(),
+            user_id=uid,
+            dish_id=did,
+            restaurant_id=dish.restaurant_id,
+            visit_id=vid,
+            rating=r.rating,
+        )
+        db.add(rating)
+
+    db.commit()
+    recompute_profile(db, uid)
+    return {"rated": len(payload.ratings)}
+
+
+@app.get("/api/visits/{user_id}/{visit_id}/dishes")
+def get_visit_dishes(
+    user_id: str,
+    visit_id: str,
+    db: Session = Depends(get_db),
+):
+    uid = _parse_uuid(user_id)
+    vid = _parse_uuid(visit_id)
+
+    visit = db.query(RestaurantVisit).filter(
+        RestaurantVisit.id == vid,
+        RestaurantVisit.user_id == uid,
+    ).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    ratings = db.query(DishRating).filter(DishRating.visit_id == vid).all()
+    return [
+        {
+            "dish_rating_id": str(dr.id),
+            "rating": dr.rating,
+            "notes": dr.notes,
+            "rated_at": dr.rated_at.isoformat() if dr.rated_at else None,
+            "dish": _dish_to_dict(dr.dish) if dr.dish else None,
+        }
+        for dr in ratings
+    ]
+
+
+@app.delete("/api/visits/{user_id}/{visit_id}", status_code=204)
+def delete_visit(user_id: str, visit_id: str, db: Session = Depends(get_db)):
+    uid   = _parse_uuid(user_id)
+    vid   = _parse_uuid(visit_id)
     visit = (
         db.query(RestaurantVisit)
         .filter(RestaurantVisit.user_id == uid, RestaurantVisit.id == vid)
@@ -437,11 +806,10 @@ def delete_visit(user_id: str, visit_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Visit not found")
     db.delete(visit)
     db.commit()
-    # Recompute profile with this visit removed
     recompute_profile(db, uid)
 
 
-# ── Recommend — instant formula scoring ──────────────────────────────────────
+# ── Recommend — formula scoring ───────────────────────────────────────────────
 
 def _get_community_favorites(
     db: Session,
@@ -450,22 +818,28 @@ def _get_community_favorites(
     min_dish_rating: int = 7,
     fuzzy_threshold: float = 0.70,
 ) -> list[str]:
-    """Return favorite dish names rated highly by other users at the same restaurant."""
+    """Return dish names rated highly by other users at the same restaurant."""
     from difflib import SequenceMatcher
 
-    rows = (
-        db.query(RestaurantVisit.favorite_dish)
-        .filter(
-            RestaurantVisit.dish_rating >= min_dish_rating,
-            RestaurantVisit.favorite_dish.isnot(None),
-        )
-        .all()
-    )
-    if not rows:
-        return []
+    name_lower = restaurant_name.lower()
+    favorites: list[str] = []
 
-    # We need the restaurant_name too for fuzzy matching — re-query with it
-    rows_full = (
+    # New path: DishRating -> Dish -> Restaurant
+    dr_query = (
+        db.query(DishRating, Dish, Restaurant)
+        .join(Dish, DishRating.dish_id == Dish.id)
+        .join(Restaurant, DishRating.restaurant_id == Restaurant.id)
+        .filter(DishRating.rating >= min_dish_rating)
+    )
+    if exclude_user_id:
+        dr_query = dr_query.filter(DishRating.user_id != exclude_user_id)
+    for dr, dish, restaurant in dr_query.all():
+        ratio = SequenceMatcher(None, (restaurant.name or "").lower(), name_lower).ratio()
+        if ratio >= fuzzy_threshold:
+            favorites.append(dish.dish_name)
+
+    # Legacy path: RestaurantVisit.favorite_dish (backward compat)
+    legacy_query = (
         db.query(RestaurantVisit.restaurant_name, RestaurantVisit.favorite_dish)
         .filter(
             RestaurantVisit.dish_rating >= min_dish_rating,
@@ -473,26 +847,19 @@ def _get_community_favorites(
         )
     )
     if exclude_user_id:
-        rows_full = rows_full.filter(RestaurantVisit.user_id != exclude_user_id)
-    rows_full = rows_full.all()
-
-    name_lower = restaurant_name.lower()
-    favorites: list[str] = []
-    for row_name, dish in rows_full:
+        legacy_query = legacy_query.filter(RestaurantVisit.user_id != exclude_user_id)
+    for row_name, dish in legacy_query.all():
         ratio = SequenceMatcher(None, (row_name or "").lower(), name_lower).ratio()
         if ratio >= fuzzy_threshold and dish:
             favorites.append(dish)
 
-    logger.info(
-        f"[rank] community favorites for '{restaurant_name}': {favorites or 'none'}"
-    )
+    logger.info(f"[rank] community favorites for '{restaurant_name}': {favorites or 'none'}")
     return favorites
 
 
 @app.post("/api/recommend/rank")
 def rank_endpoint(payload: RankRequest, db: Session = Depends(get_db)):
     """Apply formula-based scoring to a pre-parsed dish list."""
-    # Fetch community favorites regardless of whether the user has a profile
     uid: uuid.UUID | None = None
     if payload.user_id:
         try:
@@ -530,7 +897,7 @@ def rank_endpoint(payload: RankRequest, db: Session = Depends(get_db)):
         from difflib import SequenceMatcher
         dishes_out = []
         for dish in payload.dishes:
-            name = dish.get("dish_name", "")
+            name    = dish.get("dish_name", "")
             is_pick = any(
                 SequenceMatcher(None, name.lower(), cf.lower()).ratio() > 0.6
                 for cf in community_favorites
@@ -562,19 +929,18 @@ async def recommend_endpoint(
 
     try:
         image_data = await file.read()
-        raw_text = extract_text_from_image(image_data)
-        parsed = parse_menu_text(raw_text)
+        parsed     = parse_menu_image(image_data)
     except Exception as e:
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
-    dishes = parsed.get("dishes", [])
+    dishes          = parsed.get("dishes", [])
     restaurant_name = parsed.get("restaurant_name", "")
-    cuisine_type = parsed.get("cuisine_type", "")
+    cuisine_type    = parsed.get("cuisine_type", "")
 
     if user_id:
         try:
-            uid = uuid.UUID(user_id)
+            uid     = uuid.UUID(user_id)
             profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
             if profile:
                 scored = score_dishes(dishes, _profile_to_dict(profile), cuisine_type)
@@ -606,7 +972,7 @@ class _SSELogHandler(logging.Handler):
 
     def __init__(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
         super().__init__()
-        self._loop = loop
+        self._loop  = loop
         self._queue = queue
 
     def emit(self, record: logging.LogRecord):
@@ -624,23 +990,23 @@ class _SSELogHandler(logging.Handler):
 async def recommend_stream(
     file: UploadFile = File(...),
     user_id: Optional[str] = Form(None),
+    restaurant_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
     image_data = await file.read()
-    filename = file.filename
+    filename   = file.filename
 
     async def generate():
-        loop = asyncio.get_running_loop()
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
 
         handler = _SSELogHandler(loop, queue)
         handler.setFormatter(logging.Formatter("%(message)s"))
 
         watched = [
-            logging.getLogger("app.ocr"),
             logging.getLogger("app.llm"),
             logging.getLogger("app.main"),
         ]
@@ -652,45 +1018,41 @@ async def recommend_stream(
 
         def run():
             try:
-                # ── OCR ──────────────────────────────────────────────────────
-                _sse({"type": "log", "message": f"[OCR] Processing {filename}..."})
-                raw_text = extract_text_from_image(image_data)
-                lines = [l for l in raw_text.splitlines() if l.strip()]
-                _sse({"type": "log", "message": f"[OCR] Extracted {len(lines)} lines"})
-                for i, line in enumerate(lines, 1):
-                    _sse({"type": "log", "message": f"[OCR]  {i:>3}: {line}"})
+                uid: uuid.UUID | None = None
+                if user_id:
+                    try:
+                        uid = uuid.UUID(user_id)
+                    except ValueError:
+                        pass
 
-                # ── Debug: emit raw OCR text ──────────────────────────────────
-                _sse({"type": "debug_ocr", "text": raw_text})
-
-                # ── Debug: emit first LLM prompt (mirrors _clean_ocr_text) ───
-                first_llm_input = (
-                    "SYSTEM: You are an OCR correction assistant. Fix garbled characters, "
-                    "merge broken words, and return clean readable menu text preserving all "
-                    "sections, dish names, descriptions, and prices. Return ONLY the corrected "
-                    "plain text.\n\n"
-                    "USER: Clean up this raw OCR menu text. Fix errors, merge split words, "
-                    "keep all dish names, prices, and section headers. Return only the "
-                    "corrected plain text:\n\n"
-                    f"{raw_text}"
-                )
-                _sse({"type": "debug_llm_input", "text": first_llm_input})
-
-                # ── LLM parse ────────────────────────────────────────────────
-                _sse({"type": "log", "message": "[LLM] Parsing menu..."})
-                parsed = parse_menu_text(raw_text)
-                dishes = parsed.get("dishes", [])
+                _sse({"type": "log", "message": f"[Claude] Analyzing {filename}..."})
+                parsed          = parse_menu_image(image_data)
+                dishes          = parsed.get("dishes", [])
                 restaurant_name = parsed.get("restaurant_name", "")
-                cuisine_type = parsed.get("cuisine_type", "")
-                _sse({"type": "log", "message": f"[LLM] Found {len(dishes)} dishes | restaurant='{restaurant_name}' cuisine='{cuisine_type}'"})
+                cuisine_type    = parsed.get("cuisine_type", "")
+                _sse({
+                    "type": "log",
+                    "message": (
+                        f"[Claude] Found {len(dishes)} dishes | "
+                        f"restaurant='{restaurant_name}' cuisine='{cuisine_type}'"
+                    ),
+                })
 
-                # Send parsed event — frontend will show confirmation UI then call /api/recommend/rank
+                # Persist menu if a restaurant_id was provided
+                new_menu = None
+                if restaurant_id:
+                    rid      = uuid.UUID(restaurant_id)
+                    new_menu = _upsert_menu(db, rid, parsed, scanned_by=uid)
+                    # Fire background flavor enrichment (non-blocking)
+                    loop.run_in_executor(None, _enrich_dish_flavors, new_menu.id)
+
                 _sse({"type": "parsed", "data": {
                     "filename": filename,
                     "restaurant_name": restaurant_name,
                     "cuisine_type": cuisine_type,
                     "dish_count": len(dishes),
                     "dishes": dishes,
+                    "menu_id": str(new_menu.id) if new_menu else None,
                 }})
 
             except Exception as exc:
@@ -731,7 +1093,7 @@ async def import_excel(
     user_id: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    uid = _parse_uuid(user_id)
+    uid  = _parse_uuid(user_id)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -747,34 +1109,94 @@ async def import_excel(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read Excel file: {e}")
 
-    ws = wb.active
+    ws       = wb.active
     imported = 0
 
     for row in ws.iter_rows(min_row=1, values_only=True):
         # Columns: A=name, B=cuisine, C=restaurant_rating, D=fav_dish, E=dish_rating
-        name = row[0] if len(row) > 0 else None
-        cuisine = row[1] if len(row) > 1 else None
-        rating = row[2] if len(row) > 2 else None
-        fav_dish = row[3] if len(row) > 3 else None
-        dish_rating = row[4] if len(row) > 4 else None
+        name       = row[0] if len(row) > 0 else None
+        cuisine    = row[1] if len(row) > 1 else None
+        rating     = row[2] if len(row) > 2 else None
+        fav_dish   = row[3] if len(row) > 3 else None
+        dish_rtg   = row[4] if len(row) > 4 else None
 
-        # Skip header row if col C is non-numeric
         if rating is not None and not isinstance(rating, (int, float)):
             continue
         if not name or not str(name).strip():
             continue
 
+        rest_name = str(name).strip()
+
+        # Look up or create a Restaurant record
+        restaurant = (
+            db.query(Restaurant)
+            .filter(Restaurant.name.ilike(rest_name))
+            .first()
+        )
+        if not restaurant:
+            restaurant = Restaurant(
+                id=uuid.uuid4(),
+                name=rest_name,
+                cuisine_type=str(cuisine).strip() if cuisine else None,
+            )
+            db.add(restaurant)
+            db.flush()
+
         visit = RestaurantVisit(
             id=uuid.uuid4(),
             user_id=uid,
-            restaurant_name=str(name).strip(),
+            restaurant_id=restaurant.id,
+            restaurant_name=rest_name,
             cuisine_type=str(cuisine).strip() if cuisine else None,
             restaurant_rating=int(rating) if rating is not None else None,
             favorite_dish=str(fav_dish).strip() if fav_dish else None,
-            dish_rating=int(dish_rating) if dish_rating is not None else None,
+            dish_rating=int(dish_rtg) if dish_rtg is not None else None,
             source="import",
         )
         db.add(visit)
+        db.flush()
+
+        # If a favorite dish is present, create a stub Dish + DishRating so the
+        # data participates in flavor-based profile recomputation.
+        if fav_dish and dish_rtg is not None:
+            stub_menu = Menu(
+                id=uuid.uuid4(),
+                restaurant_id=restaurant.id,
+                scanned_by=None,
+                verified=False,
+                dish_count=1,
+                raw_response=None,
+            )
+            # Only one menu per restaurant — skip if one already exists
+            existing_menu = (
+                db.query(Menu)
+                .filter(Menu.restaurant_id == restaurant.id)
+                .first()
+            )
+            target_menu = existing_menu if existing_menu else stub_menu
+            if not existing_menu:
+                db.add(stub_menu)
+                db.flush()
+
+            stub_dish = Dish(
+                id=uuid.uuid4(),
+                menu_id=target_menu.id,
+                restaurant_id=restaurant.id,
+                dish_name=str(fav_dish).strip(),
+                flavor_source="none",
+            )
+            db.add(stub_dish)
+            db.flush()
+
+            db.add(DishRating(
+                id=uuid.uuid4(),
+                user_id=uid,
+                dish_id=stub_dish.id,
+                restaurant_id=restaurant.id,
+                visit_id=visit.id,
+                rating=int(dish_rtg),
+            ))
+
         imported += 1
 
     db.commit()

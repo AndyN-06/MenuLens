@@ -17,22 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    # Uncomment the block below to enable NVIDIA GPU acceleration (~10-20× faster).
-    # Requires: NVIDIA GPU + nvidia-container-toolkit installed on the host.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-
   backend:
     build:
       context: ..
@@ -44,14 +28,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://menulens:menulens@db:5432/menulens
-      - OLLAMA_URL=http://ollama:11434
-      - OLLAMA_MODEL=phi3:mini
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
       db:
         condition: service_healthy
-      ollama:
-        condition: service_started
 
 volumes:
   pgdata:
-  ollama_data:
