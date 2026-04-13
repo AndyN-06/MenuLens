@@ -1,3 +1,5 @@
+// Not Used
+
 function DebugPanel({ ocrText, llmInput, recommendation }) {
   if (!ocrText && !llmInput && !recommendation) return null
 

@@ -23,8 +23,8 @@ function Uploader({ onFileSelect, stage, onReset }) {
   }
 
   const handleFile = (file) => {
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file (JPEG, PNG, etc.)')
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      alert('Please upload an image (JPEG, PNG, etc.) or a PDF')
       return
     }
     onFileSelect(file)
@@ -54,7 +54,7 @@ function Uploader({ onFileSelect, stage, onReset }) {
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,application/pdf"
           onChange={handleChange}
           style={{ display: 'none' }}
           disabled={isProcessing}
@@ -77,10 +77,10 @@ function Uploader({ onFileSelect, stage, onReset }) {
 
         {/* Label */}
         <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--text)', marginBottom: '0.25rem' }}>
-          {isProcessing ? 'Analyzing menu…' : 'Upload menu photo'}
+          {isProcessing ? 'Analyzing menu…' : 'Upload menu photo or PDF'}
         </div>
         <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-          {isProcessing ? 'AI parsing in progress' : 'Tap to browse or drag & drop'}
+          {isProcessing ? 'AI parsing in progress' : 'Tap to browse or drag & drop · JPEG, PNG, PDF'}
         </div>
       </div>
 

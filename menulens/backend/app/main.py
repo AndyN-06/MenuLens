@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from .llm import (
     parse_menu_image,
+    parse_menu_pdf,
     health_check_anthropic,
     summarize_taste_profile,
     _get_client,
@@ -34,6 +35,24 @@ from .models import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _is_image(content_type: str) -> bool:
+    return bool(content_type and content_type.startswith("image/"))
+
+
+def _is_pdf(content_type: str) -> bool:
+    return content_type == "application/pdf"
+
+
+async def _parse_upload(file: UploadFile) -> tuple[bytes, dict]:
+    """Read the upload and dispatch to the correct parser. Returns (raw_bytes, parsed)."""
+    ct = file.content_type or ""
+    if not (_is_image(ct) or _is_pdf(ct)):
+        raise HTTPException(status_code=400, detail="File must be an image or PDF")
+    data = await file.read()
+    parsed = parse_menu_pdf(data) if _is_pdf(ct) else parse_menu_image(data)
+    return data, parsed
 
 
 @asynccontextmanager
@@ -510,13 +529,9 @@ async def health_llm():
 
 @app.post("/api/ocr")
 async def ocr_endpoint(file: UploadFile = File(...)):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
     try:
-        image_data = await file.read()
-        logger.info(f"[OCR] processing {file.filename} ({len(image_data):,} bytes)")
-        parsed = parse_menu_image(image_data)
-        # Return dish names as plain text for backward compat with debug tooling
+        data, parsed = await _parse_upload(file)
+        logger.info(f"[OCR] processing {file.filename} ({len(data):,} bytes)")
         lines = [d.get("dish_name", "") for d in parsed.get("dishes", [])]
         text  = "\n".join(lines)
         return {"filename": file.filename, "text": text, "char_count": len(text)}
@@ -529,11 +544,8 @@ async def ocr_endpoint(file: UploadFile = File(...)):
 
 @app.post("/api/parse")
 async def parse_endpoint(file: UploadFile = File(...)):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
     try:
-        image_data = await file.read()
-        parsed = parse_menu_image(image_data)
+        _, parsed = await _parse_upload(file)
         return {
             "filename": file.filename,
             "dish_count": len(parsed.get("dishes", [])),
@@ -1055,12 +1067,10 @@ async def recommend_endpoint(
     user_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
     try:
-        image_data = await file.read()
-        parsed     = parse_menu_image(image_data)
+        _, parsed = await _parse_upload(file)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
@@ -1124,11 +1134,13 @@ async def recommend_stream(
     restaurant_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
+    ct = file.content_type or ""
+    if not (_is_image(ct) or _is_pdf(ct)):
+        raise HTTPException(status_code=400, detail="File must be an image or PDF")
 
     image_data = await file.read()
     filename   = file.filename
+    is_pdf     = _is_pdf(ct)
 
     async def generate():
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
@@ -1157,7 +1169,7 @@ async def recommend_stream(
                         pass
 
                 _sse({"type": "log", "message": f"[Claude] Analyzing {filename}..."})
-                parsed          = parse_menu_image(image_data)
+                parsed          = parse_menu_pdf(image_data) if is_pdf else parse_menu_image(image_data)
                 dishes          = parsed.get("dishes", [])
                 restaurant_name = parsed.get("restaurant_name", "")
                 cuisine_type    = parsed.get("cuisine_type", "")

@@ -223,9 +223,6 @@ _EXTRACT_PROMPT = (
 def parse_menu_image(image_data: bytes) -> dict:
     """Extract structured dish data from a menu image using Claude Vision.
 
-    Replaces the previous pipeline of:
-      EasyOCR -> _clean_ocr_text -> _chunk_text -> _extract_dishes_from_chunk (xN)
-
     Returns: {restaurant_name, cuisine_type, dishes: list[dict]}
     """
     _EMPTY = {"restaurant_name": "", "cuisine_type": "", "dishes": []}
@@ -287,6 +284,75 @@ def parse_menu_image(image_data: bytes) -> dict:
         }
         logger.info(
             f"[llm] parse_menu_image done -- {len(merged['dishes'])} dishes, "
+            f"restaurant='{merged['restaurant_name']}', cuisine='{merged['cuisine_type']}'"
+        )
+        return merged
+
+    return _EMPTY
+
+
+def parse_menu_pdf(pdf_data: bytes) -> dict:
+    """Extract structured dish data from a menu PDF using Claude's document API.
+
+    Returns: {restaurant_name, cuisine_type, dishes: list[dict]}
+    """
+    _EMPTY = {"restaurant_name": "", "cuisine_type": "", "dishes": []}
+
+    b64 = base64.standard_b64encode(pdf_data).decode("utf-8")
+
+    logger.info(
+        f"[llm] parse_menu_pdf: model={ANTHROPIC_MODEL} "
+        f"pdf_size={len(pdf_data):,}B"
+    )
+
+    try:
+        response = _get_client().messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=ANTHROPIC_MAX_TOKENS,
+            system=_EXTRACT_SYSTEM,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": _EXTRACT_PROMPT,
+                    },
+                ],
+            }],
+        )
+    except anthropic.APIError as exc:
+        logger.error(f"[llm] Anthropic API error: {exc}")
+        raise
+
+    raw = response.content[0].text
+    logger.debug(f"[llm] raw response:\n{raw[:500]}")
+
+    try:
+        result = _extract_json(raw)
+    except ValueError as exc:
+        logger.error(f"[llm] JSON extraction failed: {exc}")
+        return _EMPTY
+
+    if isinstance(result, list):
+        return {"restaurant_name": "", "cuisine_type": "", "dishes": result}
+
+    if isinstance(result, dict):
+        dishes = result.get("dishes", [])
+        merged = {
+            "restaurant_name": str(result.get("restaurant_name") or ""),
+            "cuisine_type": str(result.get("cuisine_type") or ""),
+            "dishes": dishes if isinstance(dishes, list) else [],
+        }
+        logger.info(
+            f"[llm] parse_menu_pdf done -- {len(merged['dishes'])} dishes, "
             f"restaurant='{merged['restaurant_name']}', cuisine='{merged['cuisine_type']}'"
         )
         return merged
