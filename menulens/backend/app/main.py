@@ -85,6 +85,12 @@ async def lifespan(app: FastAPI):
             "ON restaurants (name)"
         ))
 
+        # ── dish_ratings.rating: widen SMALLINT → FLOAT for decimal ratings ──
+        conn.execute(text(
+            "ALTER TABLE dish_ratings "
+            "ALTER COLUMN rating TYPE FLOAT USING rating::float"
+        ))
+
         conn.commit()
     yield
 
@@ -138,12 +144,14 @@ class RestaurantCreate(BaseModel):
 
 
 class DishRatingCreate(BaseModel):
-    dish_id: str
-    rating: int   # 1-10
+    dish_id:   Optional[str] = None   # UUID of a known dish
+    dish_name: Optional[str] = None   # fallback when dish not in DB yet
+    rating:    float                  # 1.00–10.00, up to 2 decimal places
 
 
 class DishRatingsPayload(BaseModel):
-    ratings: list[DishRatingCreate]
+    ratings:       list[DishRatingCreate]
+    restaurant_id: Optional[str] = None  # context for name-based lookups
 
 
 class RankRequest(BaseModel):
@@ -189,10 +197,19 @@ def _visit_to_dict(v: RestaurantVisit) -> dict:
         "restaurant_name": v.restaurant_name,
         "cuisine_type": v.cuisine_type,
         "restaurant_rating": v.restaurant_rating,
-        "favorite_dish": v.favorite_dish,
-        "dish_rating": v.dish_rating,
+        "favorite_dish": v.favorite_dish,   # legacy
+        "dish_rating": v.dish_rating,        # legacy
         "source": v.source,
         "visited_at": v.visited_at.isoformat() if v.visited_at else None,
+        "dish_ratings": [
+            {
+                "dish_rating_id": str(dr.id),
+                "dish_id": str(dr.dish_id),
+                "dish_name": dr.dish.dish_name if dr.dish else None,
+                "rating": dr.rating,
+            }
+            for dr in (v.dish_ratings or [])
+        ],
     }
 
 
@@ -218,13 +235,32 @@ def _upsert_menu(
     parsed: dict,
     scanned_by: uuid.UUID | None,
 ) -> Menu:
-    """Replace the existing menu for a restaurant with freshly scanned dishes."""
-    existing = db.query(Menu).filter(Menu.restaurant_id == restaurant_id).first()
-    if existing:
-        db.delete(existing)
-        db.flush()
+    """Replace the existing menu for a restaurant with freshly scanned dishes.
 
-    menu = Menu(
+    Before deleting the old menu, any DishRatings that reference old dishes are
+    re-pointed to the best fuzzy-matching dish in the new menu (threshold 0.70).
+    Unmatched ratings are preserved on a new stub dish so no data is lost.
+    """
+    from difflib import SequenceMatcher
+
+    FUZZY_THRESHOLD = 0.70
+
+    existing = db.query(Menu).filter(Menu.restaurant_id == restaurant_id).first()
+
+    # ── Phase 1: collect ratings that will become orphaned ──────────────────
+    orphaned: list[tuple[str, DishRating]] = []  # (old_dish_name, rating_row)
+    if existing:
+        for old_dish in existing.dishes:
+            ratings = (
+                db.query(DishRating)
+                .filter(DishRating.dish_id == old_dish.id)
+                .all()
+            )
+            for dr in ratings:
+                orphaned.append((old_dish.dish_name, dr))
+
+    # ── Phase 2: create the new menu + dishes ───────────────────────────────
+    new_menu = Menu(
         id=uuid.uuid4(),
         restaurant_id=restaurant_id,
         scanned_by=scanned_by,
@@ -232,20 +268,52 @@ def _upsert_menu(
         dish_count=len(parsed.get("dishes", [])),
         raw_response=parsed,
     )
-    db.add(menu)
+    db.add(new_menu)
     db.flush()
 
+    new_dishes: dict[str, Dish] = {}
     for d in parsed.get("dishes", []):
+        dish_name = d.get("dish_name", "")
         dish = Dish(
             id=uuid.uuid4(),
-            menu_id=menu.id,
+            menu_id=new_menu.id,
             restaurant_id=restaurant_id,
-            dish_name=d.get("dish_name", ""),
+            dish_name=dish_name,
             description=d.get("description", ""),
             price=d.get("price", ""),
             section=d.get("section", ""),
         )
         db.add(dish)
+        db.flush()
+        new_dishes[dish_name] = dish
+
+    # ── Phase 3: re-point orphaned ratings ──────────────────────────────────
+    for old_name, dr in orphaned:
+        best_ratio, best_dish = 0.0, None
+        for new_name, new_dish in new_dishes.items():
+            ratio = SequenceMatcher(None, old_name.lower(), new_name.lower()).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_dish = ratio, new_dish
+
+        if best_ratio >= FUZZY_THRESHOLD and best_dish is not None:
+            dr.dish_id = best_dish.id
+        else:
+            # No close match — preserve the rating on a stub dish in the new menu
+            stub = Dish(
+                id=uuid.uuid4(),
+                menu_id=new_menu.id,
+                restaurant_id=restaurant_id,
+                dish_name=old_name,
+            )
+            db.add(stub)
+            db.flush()
+            dr.dish_id = stub.id
+
+    # ── Phase 4: delete old menu (safe — all DishRatings re-pointed) ────────
+    if existing:
+        db.flush()  # ensure rating updates land before the cascade delete
+        db.delete(existing)
+        db.flush()
 
     # Update restaurant cuisine_type if scan inferred one and it wasn't set
     if parsed.get("cuisine_type"):
@@ -254,8 +322,8 @@ def _upsert_menu(
             restaurant.cuisine_type = parsed["cuisine_type"]
 
     db.commit()
-    db.refresh(menu)
-    return menu
+    db.refresh(new_menu)
+    return new_menu
 
 
 def _enrich_dish_flavors(menu_id: uuid.UUID):
@@ -528,7 +596,7 @@ def search_restaurants(q: str, limit: int = 10, db: Session = Depends(get_db)):
             "name": r.name,
             "cuisine_type": r.cuisine_type,
             "city": r.city,
-            "has_menu": r.menu is not None,
+            "has_menu": r.menu is not None and (r.menu.dish_count or 0) > 0,
             "menu_verified": r.menu.verified if r.menu else False,
             "menu_dish_count": r.menu.dish_count if r.menu else 0,
             "menu_scanned_at": r.menu.scanned_at.isoformat() if r.menu else None,
@@ -744,24 +812,87 @@ def rate_dishes(
     if not visit:
         raise HTTPException(status_code=404, detail="Visit not found")
 
+    # Resolve restaurant context (payload overrides, then fall back to visit FK)
+    rid: uuid.UUID | None = None
+    if payload.restaurant_id:
+        rid = _parse_uuid(payload.restaurant_id)
+    elif visit.restaurant_id:
+        rid = visit.restaurant_id
+
+    # Pre-fetch the restaurant's menu so we can create stub dishes for free-text names
+    menu: Menu | None = (
+        db.query(Menu).filter(Menu.restaurant_id == rid).first() if rid else None
+    )
+
+    saved = 0
     for r in payload.ratings:
-        did  = _parse_uuid(r.dish_id)
-        dish = db.query(Dish).filter(Dish.id == did).first()
+        dish: Dish | None = None
+
+        if r.dish_id:
+            # Prefer direct dish_id lookup
+            dish = db.query(Dish).filter(Dish.id == _parse_uuid(r.dish_id)).first()
+
+        elif r.dish_name and rid:
+            name_clean = r.dish_name.strip()
+            # 1. Exact case-insensitive match
+            dish = (
+                db.query(Dish)
+                .filter(
+                    Dish.restaurant_id == rid,
+                    text("lower(dish_name) = lower(:n)"),
+                )
+                .params(n=name_clean)
+                .first()
+            )
+            # 2. Partial match
+            if not dish:
+                dish = (
+                    db.query(Dish)
+                    .filter(
+                        Dish.restaurant_id == rid,
+                        Dish.dish_name.ilike(f"%{name_clean}%"),
+                    )
+                    .first()
+                )
+            # 3. Create a stub dish so the rating is still stored.
+            #    If the restaurant has no menu yet, create a stub menu first.
+            if not dish and rid:
+                if not menu:
+                    menu = Menu(
+                        id=uuid.uuid4(),
+                        restaurant_id=rid,
+                        scanned_by=None,
+                        verified=False,
+                        dish_count=0,
+                    )
+                    db.add(menu)
+                    db.flush()
+                dish = Dish(
+                    id=uuid.uuid4(),
+                    menu_id=menu.id,
+                    restaurant_id=rid,
+                    dish_name=name_clean,
+                )
+                db.add(dish)
+                db.flush()
+
         if not dish:
             continue
-        rating = DishRating(
+
+        clamped = round(max(1.0, min(10.0, float(r.rating))), 2)
+        db.add(DishRating(
             id=uuid.uuid4(),
             user_id=uid,
-            dish_id=did,
+            dish_id=dish.id,
             restaurant_id=dish.restaurant_id,
             visit_id=vid,
-            rating=r.rating,
-        )
-        db.add(rating)
+            rating=clamped,
+        ))
+        saved += 1
 
     db.commit()
     recompute_profile(db, uid)
-    return {"rated": len(payload.ratings)}
+    return {"rated": saved}
 
 
 @app.get("/api/visits/{user_id}/{visit_id}/dishes")
@@ -815,7 +946,7 @@ def _get_community_favorites(
     db: Session,
     restaurant_name: str,
     exclude_user_id: uuid.UUID | None = None,
-    min_dish_rating: int = 7,
+    min_dish_rating: float = 7.0,
     fuzzy_threshold: float = 0.70,
 ) -> list[str]:
     """Return dish names rated highly by other users at the same restaurant."""

@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import Uploader from './components/Uploader'
 import DishCards from './components/DishCards'
 import Onboarding from './components/Onboarding'
-import ProcessingLog from './components/ProcessingLog'
 import Login from './components/Login'
 import MyMealsPanel from './components/MyMealsPanel'
-import DebugPanel from './components/DebugPanel'
+import RestaurantSearch from './components/RestaurantSearch'
+import NewRestaurantForm from './components/NewRestaurantForm'
+import LogMealForm from './components/LogMealForm'
 
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
@@ -75,12 +76,8 @@ function BottomNav({ activeTab, onTabChange, pendingCount }) {
         My List
         {pendingCount > 0 && (
           <span style={{
-            position: 'absolute',
-            top: '6px',
-            right: '10px',
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
+            position: 'absolute', top: '6px', right: '10px',
+            width: '8px', height: '8px', borderRadius: '50%',
             backgroundColor: 'var(--teal)',
           }} />
         )}
@@ -132,26 +129,171 @@ function ProfileTab({ username, onLogout }) {
   )
 }
 
+// ── No-menu card ───────────────────────────────────────────────────────────────
+function NoMenuCard({ restaurant, onScanMenu, onLogMeal, onChangeRestaurant }) {
+  return (
+    <div className="card fade-in" style={{ marginTop: '1.25rem' }}>
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.2rem' }}>
+          {restaurant.name}
+        </div>
+        {(restaurant.cuisine_type || restaurant.city) && (
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            {[restaurant.cuisine_type, restaurant.city].filter(Boolean).join(' · ')}
+          </div>
+        )}
+        <div style={{
+          marginTop: '0.75rem',
+          padding: '0.6rem 0.75rem',
+          background: 'var(--surface-2)',
+          borderRadius: 'var(--radius)',
+          fontSize: '0.8rem',
+          color: 'var(--text-muted)',
+        }}>
+          No menu scanned yet
+        </div>
+      </div>
+
+      <button
+        className="primary"
+        onClick={onScanMenu}
+        style={{ width: '100%', marginBottom: '0.625rem' }}
+      >
+        Scan menu
+      </button>
+
+      <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <button
+          onClick={onLogMeal}
+          style={{ flex: 1, fontSize: '0.85rem', padding: '0.55rem' }}
+        >
+          Log a meal
+        </button>
+        <button
+          onClick={onChangeRestaurant}
+          style={{ flex: 1, fontSize: '0.85rem', padding: '0.55rem' }}
+        >
+          Change restaurant
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Existing-menu card ─────────────────────────────────────────────────────────
+function ExistingMenuCard({ restaurant, onUseExisting, onScanNew, onLogMeal, onChangeRestaurant }) {
+  const scannedAt = restaurant.menu_scanned_at
+    ? new Date(restaurant.menu_scanned_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null
+
+  return (
+    <div className="card fade-in" style={{ marginTop: '1.25rem' }}>
+      {/* Restaurant info */}
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.2rem' }}>
+              {restaurant.name}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              {[restaurant.cuisine_type, restaurant.city].filter(Boolean).join(' · ')}
+            </div>
+          </div>
+          {restaurant.menu_verified && (
+            <span style={{
+              fontSize: '0.65rem', fontWeight: 600,
+              background: 'var(--green-tint)', color: 'var(--green)',
+              padding: '0.2rem 0.55rem', borderRadius: '99px',
+            }}>
+              Verified
+            </span>
+          )}
+        </div>
+
+        <div style={{
+          marginTop: '0.75rem',
+          padding: '0.6rem 0.75rem',
+          background: 'var(--surface-2)',
+          borderRadius: 'var(--radius)',
+          fontSize: '0.8rem',
+          color: 'var(--text-muted)',
+          display: 'flex', gap: '1rem',
+        }}>
+          <span>{restaurant.menu_dish_count} dishes on file</span>
+          {scannedAt && <span>Scanned {scannedAt}</span>}
+        </div>
+      </div>
+
+      {/* Primary CTA */}
+      <button
+        className="primary"
+        onClick={onUseExisting}
+        style={{ width: '100%', marginBottom: '0.625rem' }}
+      >
+        Get Recommendations
+      </button>
+
+      {/* Secondary actions */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <button
+          onClick={onLogMeal}
+          style={{ flex: 1, fontSize: '0.85rem', padding: '0.55rem' }}
+        >
+          Log a meal
+        </button>
+        <button
+          onClick={onScanNew}
+          style={{ flex: 1, fontSize: '0.85rem', padding: '0.55rem' }}
+        >
+          Scan new menu
+        </button>
+      </div>
+      <button
+        onClick={onChangeRestaurant}
+        style={{ width: '100%', fontSize: '0.85rem', padding: '0.55rem' }}
+      >
+        Change restaurant
+      </button>
+    </div>
+  )
+}
+
+// ── Ranking spinner ────────────────────────────────────────────────────────────
+function RankingSpinner() {
+  return (
+    <div className="card fade-in" style={{
+      marginTop: '1.5rem',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', gap: '0.75rem',
+      padding: '2.5rem 1.5rem',
+      textAlign: 'center',
+    }}>
+      <div className="spinner" style={{ width: '1.75rem', height: '1.75rem' }} />
+      <div style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+        Getting your recommendations…
+      </div>
+    </div>
+  )
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────────
 function App() {
-  // stages: loading | login | onboarding | idle | uploading | confirming | done | error
-  const [stage, setStage] = useState('loading')
-  const [userId, setUserId] = useState(null)
-  const [username, setUsername] = useState(null)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState(null)
-  const [logs, setLogs] = useState([])
+  // stages: loading | login | onboarding | idle | new_restaurant |
+  //         log_meal | ready_to_scan | uploading | ranking | done | error
+  const [stage,      setStage]      = useState('loading')
+  const [userId,     setUserId]     = useState(null)
+  const [username,   setUsername]   = useState(null)
+  const [activeTab,  setActiveTab]  = useState('scan')
+
+  // Restaurant selection
+  const [selectedRestaurant,  setSelectedRestaurant]  = useState(null)
+  const [newRestaurantName,   setNewRestaurantName]   = useState('')
+  const [creatingRestaurant,  setCreatingRestaurant]  = useState(false)
+
+  // Results
+  const [result,       setResult]       = useState(null)
+  const [error,        setError]        = useState(null)
   const [pendingVisits, setPendingVisits] = useState([])
-  const [activeTab, setActiveTab] = useState('scan')
-
-  const parsedRef = useRef(null)
-  const [confirmedName, setConfirmedName] = useState('')
-  const [confirmedCuisine, setConfirmedCuisine] = useState('')
-  const [ranking, setRanking] = useState(false)
-
-  const [debugOcr, setDebugOcr] = useState('')
-  const [debugLlmInput, setDebugLlmInput] = useState('')
-  const [debugRecommendation, setDebugRecommendation] = useState('')
 
   useEffect(() => {
     const storedId   = localStorage.getItem('menulens_user_id')
@@ -166,6 +308,7 @@ function App() {
     setPendingVisits(loadPendingVisits())
   }, [])
 
+  // ── Auth handlers ────────────────────────────────────────────────────────────
   const handleLogin = ({ user_id, username: name, has_profile }) => {
     localStorage.setItem('menulens_user_id', user_id)
     localStorage.setItem('menulens_username', name)
@@ -181,27 +324,110 @@ function App() {
     localStorage.removeItem('menulens_username')
     setUserId(null)
     setUsername(null)
-    setResult(null)
-    setError(null)
-    setLogs([])
+    _resetScan()
     setActiveTab('scan')
     setStage('login')
   }
 
+  // ── Shared reset ─────────────────────────────────────────────────────────────
+  const _resetScan = () => {
+    setResult(null)
+    setError(null)
+    setSelectedRestaurant(null)
+    setNewRestaurantName('')
+  }
+
+  const handleReset = () => {
+    _resetScan()
+    setStage('idle')
+  }
+
+  // ── Restaurant search handlers ────────────────────────────────────────────────
+  const handleSelectRestaurant = (restaurant) => {
+    setSelectedRestaurant(restaurant)
+    // Always stay on idle — NoMenuCard or ExistingMenuCard renders based on has_menu
+  }
+
+  const handleInitNewRestaurant = (name) => {
+    setNewRestaurantName(name)
+    setStage('new_restaurant')
+  }
+
+  const handleCreateRestaurant = async ({ name, cuisine_type, city }, intent = 'scan') => {
+    setCreatingRestaurant(true)
+    try {
+      const res = await fetch('/api/restaurants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, cuisine_type, city }),
+      })
+      if (!res.ok) throw new Error('Failed to create restaurant')
+      const data = await res.json()
+      setSelectedRestaurant({ id: data.id, name: data.name, cuisine_type, city, has_menu: false })
+      setStage(intent === 'log' ? 'log_meal' : 'ready_to_scan')
+    } catch (err) {
+      setError(err.message)
+      setStage('error')
+    } finally {
+      setCreatingRestaurant(false)
+    }
+  }
+
+  // ── Use existing menu ─────────────────────────────────────────────────────────
+  const handleUseExistingMenu = async () => {
+    setStage('ranking')
+    try {
+      const menuRes = await fetch(`/api/restaurants/${selectedRestaurant.id}/menu`)
+      if (!menuRes.ok) throw new Error('Could not load saved menu')
+      const menuData = await menuRes.json()
+
+      const rankRes = await fetch('/api/recommend/rank', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dishes:          menuData.dishes,
+          restaurant_name: selectedRestaurant.name,
+          cuisine_type:    selectedRestaurant.cuisine_type || '',
+          user_id:         userId,
+        }),
+      })
+      if (!rankRes.ok) throw new Error('Ranking failed')
+      const data = await rankRes.json()
+      setResult(data)
+      setStage('done')
+
+      // Record visit locally
+      const visit = {
+        id: Date.now().toString(),
+        restaurant_name: selectedRestaurant.name,
+        cuisine_type:    selectedRestaurant.cuisine_type || '',
+        restaurant_id:   selectedRestaurant.id || null,
+        savedAt: Date.now(),
+      }
+      const updated = [visit, ...pendingVisits].slice(0, 20)
+      setPendingVisits(updated)
+      savePendingVisits(updated)
+    } catch (err) {
+      setError(err.message)
+      setStage('error')
+    }
+  }
+
+  const handleScanNewMenu = () => {
+    setStage('ready_to_scan')
+  }
+
+  // ── File upload + stream → auto-rank ─────────────────────────────────────────
   const handleFileUpload = async (file) => {
     setStage('uploading')
     setError(null)
     setResult(null)
-    setLogs([])
-    parsedRef.current = null
-    setDebugOcr('')
-    setDebugLlmInput('')
-    setDebugRecommendation('')
 
     try {
       const formData = new FormData()
       formData.append('file', file)
       if (userId) formData.append('user_id', userId)
+      if (selectedRestaurant?.id) formData.append('restaurant_id', selectedRestaurant.id)
 
       const response = await fetch('/api/recommend/stream', {
         method: 'POST',
@@ -213,10 +439,10 @@ function App() {
         throw new Error(body.detail || `Request failed: ${response.statusText}`)
       }
 
-      const reader = response.body.getReader()
+      const reader  = response.body.getReader()
       const decoder = new TextDecoder()
-      let buffer = ''
-      let gotParsed = false
+      let buffer    = ''
+      let parsedData = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -232,59 +458,41 @@ function App() {
           let event
           try { event = JSON.parse(dataLine.slice(6)) } catch { continue }
 
-          if (event.type === 'heartbeat') continue
-          if (event.type === 'log') {
-            setLogs(prev => [...prev, event.message])
-          } else if (event.type === 'debug_ocr') {
-            setDebugOcr(event.text)
-          } else if (event.type === 'debug_llm_input') {
-            setDebugLlmInput(event.text)
-          } else if (event.type === 'parsed') {
-            gotParsed = true
-            parsedRef.current = event.data
-            setConfirmedName(event.data.restaurant_name || '')
-            setConfirmedCuisine(event.data.cuisine_type || '')
-            setStage('confirming')
-          } else if (event.type === 'error') {
-            throw new Error(event.message)
-          }
+          if (event.type === 'heartbeat' || event.type === 'log') continue
+          if (event.type === 'parsed') parsedData = event.data
+          else if (event.type === 'error') throw new Error(event.message)
         }
       }
 
-      if (!gotParsed) {
+      if (!parsedData) {
         throw new Error('Stream ended without parsed data — check backend logs')
       }
-    } catch (err) {
-      setError(err.message)
-      setStage('error')
-    }
-  }
 
-  const handleConfirmRestaurant = async () => {
-    if (!parsedRef.current) return
-    setRanking(true)
+      // Rank immediately using the already-confirmed restaurant name/cuisine
+      setStage('ranking')
+      const restaurantName = selectedRestaurant?.name    || parsedData.restaurant_name || ''
+      const cuisineType    = selectedRestaurant?.cuisine_type || parsedData.cuisine_type    || ''
 
-    try {
-      const res = await fetch('/api/recommend/rank', {
+      const rankRes = await fetch('/api/recommend/rank', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          dishes: parsedRef.current.dishes,
-          restaurant_name: confirmedName,
-          cuisine_type: confirmedCuisine,
-          user_id: userId,
+          dishes:          parsedData.dishes,
+          restaurant_name: restaurantName,
+          cuisine_type:    cuisineType,
+          user_id:         userId,
         }),
       })
-      if (!res.ok) throw new Error('Ranking failed')
-      const data = await res.json()
+      if (!rankRes.ok) throw new Error('Ranking failed')
+      const data = await rankRes.json()
       setResult(data)
-      setDebugRecommendation(JSON.stringify(data, null, 2))
       setStage('done')
 
       const visit = {
         id: Date.now().toString(),
-        restaurant_name: confirmedName,
-        cuisine_type: confirmedCuisine,
+        restaurant_name: restaurantName,
+        cuisine_type:    cuisineType,
+        restaurant_id:   selectedRestaurant?.id || null,
         savedAt: Date.now(),
       }
       const updated = [visit, ...pendingVisits].slice(0, 20)
@@ -293,22 +501,10 @@ function App() {
     } catch (err) {
       setError(err.message)
       setStage('error')
-    } finally {
-      setRanking(false)
     }
   }
 
-  const handleReset = () => {
-    setStage('idle')
-    setResult(null)
-    setError(null)
-    setLogs([])
-    parsedRef.current = null
-    setDebugOcr('')
-    setDebugLlmInput('')
-    setDebugRecommendation('')
-  }
-
+  // ── Visit handlers (My Meals tab) ─────────────────────────────────────────────
   const handleSaveVisit = async (visitData) => {
     try {
       const res = await fetch(`/api/visits/${userId}`, {
@@ -332,15 +528,12 @@ function App() {
     savePendingVisits(updated)
   }
 
+  // ── Global stage gates ────────────────────────────────────────────────────────
   if (stage === 'loading') return null
-
-  if (stage === 'login') return <Login onLogin={handleLogin} />
-
+  if (stage === 'login')   return <Login onLogin={handleLogin} />
   if (stage === 'onboarding') {
     return <Onboarding userId={userId} onComplete={handleOnboardingComplete} />
   }
-
-  const isProcessing = stage === 'uploading'
 
   // My Meals tab
   if (activeTab === 'meals') {
@@ -368,10 +561,11 @@ function App() {
     )
   }
 
-  // Scan tab (main flow)
+  // ── Scan tab ──────────────────────────────────────────────────────────────────
   return (
     <div className="app-shell">
       <div className="screen">
+
         {/* Header */}
         <div style={{ paddingTop: '0.75rem', marginBottom: '1.5rem' }}>
           <h1 style={{ marginBottom: '0.2rem' }}>MenuLens</h1>
@@ -380,11 +574,112 @@ function App() {
           </p>
         </div>
 
-        {/* Upload zone */}
-        <Uploader onFileSelect={handleFileUpload} stage={stage} onReset={handleReset} />
+        {/* ── Stage: idle — restaurant search ── */}
+        {stage === 'idle' && (
+          <div className="fade-in">
+            <p style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+              Where are you eating?
+            </p>
+            <RestaurantSearch
+              onSelect={handleSelectRestaurant}
+              onCreateNew={handleInitNewRestaurant}
+            />
 
-        {/* Error */}
-        {error && (
+            {/* Restaurant without a scanned menu */}
+            {selectedRestaurant && !selectedRestaurant.has_menu && (
+              <NoMenuCard
+                restaurant={selectedRestaurant}
+                onScanMenu={() => setStage('ready_to_scan')}
+                onLogMeal={() => setStage('log_meal')}
+                onChangeRestaurant={() => setSelectedRestaurant(null)}
+              />
+            )}
+
+            {/* Restaurant with existing menu */}
+            {selectedRestaurant && selectedRestaurant.has_menu && (
+              <ExistingMenuCard
+                restaurant={selectedRestaurant}
+                onUseExisting={handleUseExistingMenu}
+                onScanNew={handleScanNewMenu}
+                onLogMeal={() => setStage('log_meal')}
+                onChangeRestaurant={() => setSelectedRestaurant(null)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Stage: new_restaurant — creation form ── */}
+        {stage === 'new_restaurant' && (
+          <NewRestaurantForm
+            initialName={newRestaurantName}
+            onSubmit={handleCreateRestaurant}
+            onBack={() => setStage('idle')}
+            loading={creatingRestaurant}
+          />
+        )}
+
+        {/* ── Stage: log_meal — manual meal entry ── */}
+        {stage === 'log_meal' && selectedRestaurant && (
+          <LogMealForm
+            restaurant={selectedRestaurant}
+            userId={userId}
+            onSaved={handleReset}
+            onBack={handleReset}
+          />
+        )}
+
+        {/* ── Stage: ready_to_scan / uploading — file picker ── */}
+        {(stage === 'ready_to_scan' || stage === 'uploading') && (
+          <div className="fade-in">
+            {/* Restaurant context banner */}
+            {selectedRestaurant && (
+              <div style={{
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1rem',
+                padding: '0.6rem 0.875rem',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+              }}>
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>
+                    {selectedRestaurant.name}
+                  </div>
+                  {selectedRestaurant.cuisine_type && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {selectedRestaurant.cuisine_type}
+                    </div>
+                  )}
+                </div>
+                {stage === 'ready_to_scan' && (
+                  <button
+                    onClick={handleReset}
+                    style={{
+                      fontSize: '0.75rem', padding: '0.3rem 0.6rem',
+                      border: 'none', background: 'none',
+                      color: 'var(--text-dim)', cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
+
+            <Uploader
+              onFileSelect={handleFileUpload}
+              stage={stage === 'uploading' ? 'uploading' : 'idle'}
+              onReset={handleReset}
+            />
+          </div>
+        )}
+
+        {/* ── Stage: ranking — fetching existing menu recs ── */}
+        {stage === 'ranking' && <RankingSpinner />}
+
+        {/* ── Error ── */}
+        {(stage === 'error' || error) && error && (
           <div className="card fade-in" style={{
             marginTop: '1rem',
             backgroundColor: 'var(--red-tint)',
@@ -393,81 +688,28 @@ function App() {
             <div style={{ fontWeight: 600, color: 'var(--red)', marginBottom: '0.3rem', fontSize: '0.9rem' }}>
               Something went wrong
             </div>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>{error}</p>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+              {error}
+            </p>
             <button onClick={handleReset} style={{ fontSize: '0.875rem', padding: '0.5rem 1rem' }}>
               Try Again
             </button>
           </div>
         )}
 
-        {/* Processing log */}
-        {(isProcessing || (stage !== 'idle' && stage !== 'error' && logs.length > 0)) && (
-          <div className="fade-in" style={{ marginTop: '1rem' }}>
-            <ProcessingLog logs={logs} running={isProcessing} />
-          </div>
-        )}
-
-        {/* Confirm restaurant details */}
-        {stage === 'confirming' && parsedRef.current && (
-          <div className="card fade-in" style={{ marginTop: '1rem' }}>
-            <h3 style={{ marginBottom: '1rem' }}>Confirm details</h3>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Restaurant name
-                </label>
-                <input
-                  type="text"
-                  value={confirmedName}
-                  onChange={e => setConfirmedName(e.target.value)}
-                  placeholder="e.g. Sakura Garden"
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Cuisine type
-                </label>
-                <input
-                  type="text"
-                  value={confirmedCuisine}
-                  onChange={e => setConfirmedCuisine(e.target.value)}
-                  placeholder="e.g. Japanese"
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                {parsedRef.current.dish_count} dishes found
-              </span>
-              <button
-                className="primary"
-                onClick={handleConfirmRestaurant}
-                disabled={ranking}
-                style={{ minWidth: '160px' }}
-              >
-                {ranking ? 'Scoring…' : 'Get Recommendations'}
+        {/* ── Stage: done — results ── */}
+        {stage === 'done' && result && (
+          <div className="slide-up" style={{ marginTop: '1rem' }}>
+            <DishCards data={result} />
+            <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+              <button onClick={handleReset} style={{ fontSize: '0.875rem' }}>
+                Scan another restaurant
               </button>
             </div>
           </div>
         )}
 
-        {/* Results */}
-        {stage === 'done' && result && (
-          <div className="slide-up" style={{ marginTop: '1rem' }}>
-            <DishCards data={result} />
-          </div>
-        )}
-
-        {/* Debug panel — persists until next upload */}
-        <DebugPanel
-          ocrText={debugOcr}
-          llmInput={debugLlmInput}
-          recommendation={debugRecommendation}
-        />
       </div>
-
       <BottomNav activeTab={activeTab} onTabChange={setActiveTab} pendingCount={pendingVisits.length} />
     </div>
   )

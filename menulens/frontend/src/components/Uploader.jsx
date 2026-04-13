@@ -30,26 +30,21 @@ function Uploader({ onFileSelect, stage, onReset }) {
     onFileSelect(file)
   }
 
-  const handleClick = () => {
-    if (isClickable) inputRef.current?.click()
-  }
-
   const isProcessing = stage === 'uploading'
-  const isClickable  = stage === 'idle' || stage === 'error'
-  const isDone       = stage === 'done' || stage === 'confirming'
+  const isClickable  = !isProcessing
 
   return (
     <div>
       <div
-        onClick={handleClick}
+        onClick={() => { if (isClickable) inputRef.current?.click() }}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
         style={{
-          border: `2px dashed ${dragActive ? 'var(--green)' : isProcessing ? 'var(--border-hover)' : isDone ? 'var(--green)' : 'var(--border)'}`,
+          border: `2px dashed ${dragActive ? 'var(--green)' : isProcessing ? 'var(--border-hover)' : 'var(--border)'}`,
           borderRadius: 'var(--radius-lg)',
-          backgroundColor: dragActive ? 'var(--green-tint)' : isDone ? 'var(--green-tint)' : 'var(--surface)',
+          backgroundColor: dragActive ? 'var(--green-tint)' : 'var(--surface)',
           padding: '2.5rem 1.5rem',
           textAlign: 'center',
           cursor: isClickable ? 'pointer' : 'default',
@@ -69,12 +64,10 @@ function Uploader({ onFileSelect, stage, onReset }) {
         <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'center' }}>
           {isProcessing ? (
             <div className="spinner" style={{ width: '2rem', height: '2rem' }} />
-          ) : isDone ? (
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
           ) : (
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke={isClickable ? 'var(--text-dim)' : 'var(--text-dim)'} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none"
+              stroke="var(--text-dim)" strokeWidth="1.75"
+              strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="3" ry="3" />
               <circle cx="8.5" cy="8.5" r="1.5" />
               <polyline points="21 15 16 10 5 21" />
@@ -83,31 +76,12 @@ function Uploader({ onFileSelect, stage, onReset }) {
         </div>
 
         {/* Label */}
-        <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: isDone ? 'var(--green)' : 'var(--text)', marginBottom: '0.25rem' }}>
-          {isProcessing ? 'Analyzing menu…' :
-           isDone       ? (stage === 'confirming' ? 'Menu scanned' : 'Done!') :
-           stage === 'error' ? 'Upload failed' :
-           'Upload menu photo'}
+        <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--text)', marginBottom: '0.25rem' }}>
+          {isProcessing ? 'Analyzing menu…' : 'Upload menu photo'}
         </div>
         <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-          {isProcessing ? 'OCR + AI parsing in progress' :
-           stage === 'confirming' ? 'Confirm details below' :
-           isDone ? 'Tap to scan another menu' :
-           stage === 'error' ? 'Try a different image' :
-           'Tap to browse or drag & drop'}
+          {isProcessing ? 'AI parsing in progress' : 'Tap to browse or drag & drop'}
         </div>
-
-        {isDone && (
-          <div style={{ marginTop: '1rem' }}>
-            <button
-              className="primary"
-              onClick={e => { e.stopPropagation(); onReset() }}
-              style={{ fontSize: '0.875rem', padding: '0.5rem 1.25rem' }}
-            >
-              Scan Another
-            </button>
-          </div>
-        )}
       </div>
 
       {isProcessing && (

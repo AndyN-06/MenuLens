@@ -59,7 +59,8 @@ def score_dishes(
         section           = (dish.get("section") or "mains").lower()
         description       = (dish.get("description") or "").lower()
         flavor_vector     = dish.get("flavor_vector")
-        base_ingredients  = dish.get("base_ingredients") or []
+        # restaurant-specific "ingredients" overrides global "base_ingredients"
+        ingredients       = dish.get("ingredients") or dish.get("base_ingredients") or []
         flavor_confidence = float(dish.get("flavor_confidence") or 0.0)
 
         # Step 1 — Hard filter: dietary restrictions
@@ -77,12 +78,10 @@ def score_dishes(
         # Resolve preference vector via fallback hierarchy
         pref_vector = None
 
-        # Tier 1: cuisine + section (requires >= 3 dishes in section)
-        section_count = sum(
-            1 for d in dishes
-            if (d.get("section") or "mains").lower() == section
-        )
-        if cuisine_profiles.get(cuisine_lower, {}).get(section) and section_count >= 3:
+        # Tier 1: cuisine + section — use if the user has rated enough dishes in
+        # this combination (profile key exists only after recompute_profile builds it
+        # from actual ratings, so its presence is the rating-count gate)
+        if cuisine_profiles.get(cuisine_lower, {}).get(section):
             pref_vector = cuisine_profiles[cuisine_lower][section]
 
         # Tier 2: cuisine-only (average all sections)
@@ -111,16 +110,17 @@ def score_dishes(
         else:
             flavor_score = cuisine_base
 
-        # Step 3 — Ingredient score (weight 0.30)
-        if base_ingredients and (liked_ingredients or disliked_ingredients):
-            boost   = sum(liked_ingredients.get(ing, 0)    for ing in base_ingredients)
-            penalty = sum(disliked_ingredients.get(ing, 0) for ing in base_ingredients)
+        # Step 3 — Ingredient score (weight 0.30), bounded -1.0 to +1.0 via tanh
+        if ingredients and (liked_ingredients or disliked_ingredients):
+            boost   = sum(liked_ingredients.get(ing, 0)    for ing in ingredients)
+            penalty = sum(disliked_ingredients.get(ing, 0) for ing in ingredients)
             ingredient_score = math.tanh(boost - penalty)
         else:
             ingredient_score = 0.0
 
-        # Step 4 — Final score
-        score = flavor_score * 0.70 + ingredient_score * 0.30
+        # Step 4 — Final score; clamp to 0 before bonuses so strong dislike
+        # can't produce a negative base (tanh range is -1..+1)
+        score = max(0.0, flavor_score * 0.70 + ingredient_score * 0.30)
 
         # Personal top-dish bonus (+0.05)
         for td in top_dishes:

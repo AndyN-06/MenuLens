@@ -82,7 +82,7 @@ class DishRating(Base):
     dish_id       = Column(UUID(as_uuid=True), ForeignKey("dishes.id"), nullable=False)
     restaurant_id = Column(UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False)
     visit_id      = Column(UUID(as_uuid=True), ForeignKey("restaurant_visits.id"), nullable=True)
-    rating        = Column(SmallInteger, nullable=False)
+    rating        = Column(Float, nullable=False)
     notes         = Column(Text, nullable=True)
     rated_at      = Column(DateTime, server_default=func.now())
 
