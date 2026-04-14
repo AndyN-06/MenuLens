@@ -1,0 +1,28 @@
+name: MenuLens
+options:
+  bundleIdPrefix: com.menulens
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  SWIFT_VERSION: "5.9"
+  MARKETING_VERSION: "1.0"
+  CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  MenuLens:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: MenuLens
+    info:
+      path: MenuLens/Info.plist
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.menulens.app
+      INFOPLIST_FILE: MenuLens/Info.plist
+      CODE_SIGN_STYLE: Automatic
+      DEVELOPMENT_TEAM: ""          # Set to your Apple Team ID
+    dependencies: []

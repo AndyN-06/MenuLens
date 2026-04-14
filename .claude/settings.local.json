@@ -12,7 +12,8 @@
       "Bash(xargs grep:*)",
       "Bash(python -c ':*)",
       "Bash(ls -d /c/Users/andre/OneDrive/Desktop/MenuRec/*/)",
-      "Bash(git -C /Users/andy/Desktop/MenuLens log --oneline)"
+      "Bash(git -C /Users/andy/Desktop/MenuLens log --oneline)",
+      "Bash(pkill -f \"uvicorn\")"
     ]
   }
 }

@@ -256,9 +256,9 @@ def _upsert_menu(
 ) -> Menu:
     """Replace the existing menu for a restaurant with freshly scanned dishes.
 
-    Before deleting the old menu, any DishRatings that reference old dishes are
-    re-pointed to the best fuzzy-matching dish in the new menu (threshold 0.70).
-    Unmatched ratings are preserved on a new stub dish so no data is lost.
+    Existing DishRatings are snapshotted, deleted, then re-created pointing at
+    the best fuzzy-matched dish in the new menu (threshold 0.70).  Unmatched
+    ratings land on a stub dish so no data is lost.
     """
     from difflib import SequenceMatcher
 
@@ -266,19 +266,49 @@ def _upsert_menu(
 
     existing = db.query(Menu).filter(Menu.restaurant_id == restaurant_id).first()
 
-    # ── Phase 1: collect ratings that will become orphaned ──────────────────
-    orphaned: list[tuple[str, DishRating]] = []  # (old_dish_name, rating_row)
+    # ── Phase 1: snapshot rating rows as plain dicts, then DELETE them ───────
+    # We must remove ratings before dishes (FK: dish_ratings.dish_id → dishes).
+    # We use raw SQL throughout this phase so zero ORM-tracked DishRating objects
+    # ever enter the session — which would cause SQLAlchemy to emit
+    # "UPDATE dish_ratings SET dish_id=NULL" when the parent Dish is deleted.
+    rating_snapshots: list[dict] = []  # plain dicts; no ORM objects
     if existing:
-        for old_dish in existing.dishes:
-            ratings = (
-                db.query(DishRating)
-                .filter(DishRating.dish_id == old_dish.id)
-                .all()
+        old_dish_ids = [str(d.id) for d in existing.dishes]
+        if old_dish_ids:
+            dish_name_by_id = {str(d.id): d.dish_name for d in existing.dishes}
+            rows = db.execute(
+                text(
+                    "SELECT id, user_id, dish_id, restaurant_id, visit_id, "
+                    "       rating, notes, rated_at "
+                    "FROM dish_ratings "
+                    "WHERE dish_id = ANY(CAST(:ids AS uuid[]))"
+                ),
+                {"ids": old_dish_ids},
+            ).fetchall()
+            for row in rows:
+                rating_snapshots.append({
+                    "id":            row.id,
+                    "user_id":       row.user_id,
+                    "dish_id":       None,          # will be filled in Phase 4
+                    "restaurant_id": row.restaurant_id,
+                    "visit_id":      row.visit_id,
+                    "rating":        row.rating,
+                    "notes":         row.notes,
+                    "rated_at":      row.rated_at,
+                    "old_dish_name": dish_name_by_id.get(str(row.dish_id), ""),
+                })
+            db.execute(
+                text("DELETE FROM dish_ratings WHERE dish_id = ANY(CAST(:ids AS uuid[]))"),
+                {"ids": old_dish_ids},
             )
-            for dr in ratings:
-                orphaned.append((old_dish.dish_name, dr))
+            db.flush()
 
-    # ── Phase 2: create the new menu + dishes ───────────────────────────────
+    # ── Phase 2: delete old menu (cascade deletes dishes; ratings are gone) ──
+    if existing:
+        db.delete(existing)
+        db.flush()
+
+    # ── Phase 3: create the new menu + dishes ───────────────────────────────
     new_menu = Menu(
         id=uuid.uuid4(),
         restaurant_id=restaurant_id,
@@ -306,32 +336,37 @@ def _upsert_menu(
         db.flush()
         new_dishes[dish_name] = dish
 
-    # ── Phase 3: re-point orphaned ratings ──────────────────────────────────
-    for old_name, dr in orphaned:
+    # ── Phase 4: re-insert ratings pointing at matched new dishes ───────────
+    for snap in rating_snapshots:
         best_ratio, best_dish = 0.0, None
         for new_name, new_dish in new_dishes.items():
-            ratio = SequenceMatcher(None, old_name.lower(), new_name.lower()).ratio()
+            ratio = SequenceMatcher(
+                None, snap["old_dish_name"].lower(), new_name.lower()
+            ).ratio()
             if ratio > best_ratio:
                 best_ratio, best_dish = ratio, new_dish
 
-        if best_ratio >= FUZZY_THRESHOLD and best_dish is not None:
-            dr.dish_id = best_dish.id
-        else:
-            # No close match — preserve the rating on a stub dish in the new menu
+        if best_ratio < FUZZY_THRESHOLD or best_dish is None:
             stub = Dish(
                 id=uuid.uuid4(),
                 menu_id=new_menu.id,
                 restaurant_id=restaurant_id,
-                dish_name=old_name,
+                dish_name=snap["old_dish_name"],
             )
             db.add(stub)
             db.flush()
-            dr.dish_id = stub.id
+            best_dish = stub
 
-    # ── Phase 4: delete old menu (safe — all DishRatings re-pointed) ────────
-    if existing:
-        db.flush()  # ensure rating updates land before the cascade delete
-        db.delete(existing)
+        db.execute(
+            text(
+                "INSERT INTO dish_ratings "
+                "  (id, user_id, dish_id, restaurant_id, visit_id, rating, notes, rated_at) "
+                "VALUES "
+                "  (:id, :user_id, :dish_id, :restaurant_id, :visit_id, :rating, :notes, :rated_at)"
+            ),
+            {**snap, "dish_id": best_dish.id},
+        )
+    if rating_snapshots:
         db.flush()
 
     # Update restaurant cuisine_type if scan inferred one and it wasn't set
