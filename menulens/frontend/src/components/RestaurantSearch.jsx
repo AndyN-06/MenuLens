@@ -31,7 +31,7 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       try {
-        const res  = await fetch(`/api/restaurants/search?q=${encodeURIComponent(query)}&limit=8`)
+        const res = await fetch(apiUrl(`/api/restaurants/search?q=${encodeURIComponent(query)}&limit=8`))
         const data = await res.json()
         setResults(data)
         setOpen(true)

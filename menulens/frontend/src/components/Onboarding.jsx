@@ -116,7 +116,7 @@ function Onboarding({ userId, onComplete }) {
     setSubmitError(null)
     try {
       for (const cuisine of selectedCuisines) {
-        await fetch(`/api/visits/${userId}`, {
+        await fetch(apiUrl(`/api/visits/${userId}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ restaurant_name: `${cuisine} cuisine`, cuisine_type: cuisine, restaurant_rating: 7, source: 'survey' }),
@@ -125,13 +125,13 @@ function Onboarding({ userId, onComplete }) {
 
       const restrictions = dietary ? dietary.split(',').map(s => s.trim()).filter(Boolean) : []
       if (restrictions.length > 0) {
-        const res = await fetch(`/api/profile/${userId}`, {
+        const res = await fetch(apiUrl(`/api/profile/${userId}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dietary_restrictions: restrictions }),
         })
         if (res.status === 404) {
-          await fetch(`/api/profile/${userId}`, {
+          await fetch(apiUrl(`/api/profile/${userId}`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ dietary_restrictions: restrictions }),

@@ -168,7 +168,7 @@ function LogMealForm({ restaurant, userId, onSaved, onBack }) {
   useEffect(() => {
     if (!restaurant.id || !restaurant.has_menu) return
     setLoadingDishes(true)
-    fetch(`/api/restaurants/${restaurant.id}/menu`)
+    fetch(apiUrl(`/api/restaurants/${restaurant.id}/menu`))
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.dishes) setMenuDishes(data.dishes) })
       .catch(() => {})
@@ -217,7 +217,7 @@ function LogMealForm({ restaurant, userId, onSaved, onBack }) {
     setSaving(true)
     setError(null)
     try {
-      const visitRes = await fetch(`/api/visits/${userId}`, {
+      const visitRes = await fetch(apiUrl(`/api/visits/${userId}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -233,7 +233,7 @@ function LogMealForm({ restaurant, userId, onSaved, onBack }) {
 
       const validRatings = ratedDishes.filter(d => d.rating !== '' && !isNaN(parseFloat(d.rating)))
       if (validRatings.length > 0) {
-        const dishRes = await fetch(`/api/visits/${userId}/${visit.id}/dishes`, {
+        const dishRes = await fetch(apiUrl(`/api/visits/${userId}/${visit.id}/dishes`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
