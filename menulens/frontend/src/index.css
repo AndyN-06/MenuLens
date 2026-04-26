@@ -109,7 +109,7 @@ p {
 .app-shell {
   width: 100%;
   max-width: var(--app-max-width);
-  min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background-color: var(--bg);
@@ -118,9 +118,9 @@ p {
 
 .screen {
   flex: 1;
-  padding: 1.25rem 1rem;
-  padding-bottom: calc(var(--bottom-nav-height) + 1rem);
+  padding: 1.25rem 1rem 1rem;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Cards */
@@ -265,12 +265,8 @@ input:focus, textarea:focus, select:focus {
 
 /* Bottom Nav */
 .bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  flex-shrink: 0;
   width: 100%;
-  max-width: var(--app-max-width);
   height: var(--bottom-nav-height);
   background-color: var(--surface);
   border-top: 1px solid var(--border);
