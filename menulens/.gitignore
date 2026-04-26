@@ -3,24 +3,23 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/build/
-frontend/.env
-frontend/.env.local
-frontend/.env.*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
 # Python / Backend
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 .Python
+.venv/
+venv/
 backend/.venv/
 backend/venv/
-backend/__pycache__/
-backend/app/__pycache__/
 *.egg-info/
 dist/
 build/
@@ -29,10 +28,17 @@ build/
 .mypy_cache/
 .ruff_cache/
 
-# Environment variables
+# Environment variables (all of them; commit .env.example instead)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Uploaded / generated files
+backend/uploads/
+uploads/
 
 # Docker
 *.override.yml

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiUrl } from './api'
 import Uploader from './components/Uploader'
 import DishCards from './components/DishCards'
 import Onboarding from './components/Onboarding'
@@ -297,8 +298,8 @@ function ProfileTab({ username, userId, onLogout }) {
   useEffect(() => {
     if (!userId) { setLoading(false); return }
     Promise.all([
-      fetch(`/api/profile/${userId}`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/visits/${userId}`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(apiUrl(`/api/profile/${userId}`)).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(apiUrl(`/api/visits/${userId}`)).then(r => r.ok ? r.json() : []).catch(() => []),
     ]).then(([profileData, visitsData]) => {
       setProfile(profileData)
       setVisits(Array.isArray(visitsData) ? visitsData : [])
@@ -697,7 +698,7 @@ function App() {
   const handleCreateRestaurant = async ({ name, cuisine_type, city }, intent = 'scan') => {
     setCreatingRestaurant(true)
     try {
-      const res = await fetch('/api/restaurants', {
+      const res = await fetch(apiUrl('/api/restaurants'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, cuisine_type, city }),
@@ -718,11 +719,11 @@ function App() {
   const handleUseExistingMenu = async () => {
     setStage('ranking')
     try {
-      const menuRes = await fetch(`/api/restaurants/${selectedRestaurant.id}/menu`)
+      const menuRes = await fetch(apiUrl(`/api/restaurants/${selectedRestaurant.id}/menu`))
       if (!menuRes.ok) throw new Error('Could not load saved menu')
       const menuData = await menuRes.json()
 
-      const rankRes = await fetch('/api/recommend/rank', {
+      const rankRes = await fetch(apiUrl('/api/recommend/rank'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -768,7 +769,7 @@ function App() {
       if (userId) formData.append('user_id', userId)
       if (selectedRestaurant?.id) formData.append('restaurant_id', selectedRestaurant.id)
 
-      const response = await fetch('/api/recommend/stream', {
+      const response = await fetch(apiUrl('/api/recommend/stream'), {
         method: 'POST',
         body: formData,
       })
@@ -811,7 +812,7 @@ function App() {
       const restaurantName = selectedRestaurant?.name    || parsedData.restaurant_name || ''
       const cuisineType    = selectedRestaurant?.cuisine_type || parsedData.cuisine_type    || ''
 
-      const rankRes = await fetch('/api/recommend/rank', {
+      const rankRes = await fetch(apiUrl('/api/recommend/rank'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -846,7 +847,7 @@ function App() {
   // ── Visit handlers (My List tab) ──────────────────────────────────────────────
   const handleSaveVisit = async (visitData) => {
     try {
-      const res = await fetch(`/api/visits/${userId}`, {
+      const res = await fetch(apiUrl(`/api/visits/${userId}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(visitData),

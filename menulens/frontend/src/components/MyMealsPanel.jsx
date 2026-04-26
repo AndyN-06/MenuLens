@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiUrl } from '../api'
 
 // ── Image compression helper ───────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
   useEffect(() => {
     if (!visit.restaurant_id) return
     setLoadingDishes(true)
-    fetch(`/api/restaurants/${visit.restaurant_id}/menu`)
+    fetch(apiUrl(`/api/restaurants/${visit.restaurant_id}/menu`))
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.dishes) setMenuDishes(data.dishes) })
       .catch(() => {})
@@ -262,7 +263,7 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
       const validRatings = ratedDishes.filter(d => d.rating !== '' && !isNaN(parseFloat(d.rating)))
 
       if (validRatings.length > 0) {
-        const res = await fetch(`/api/visits/${userId}/${saved.id}/dishes`, {
+        const res = await fetch(apiUrl(`/api/visits/${userId}/${saved.id}/dishes`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -621,7 +622,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
   useEffect(() => {
     if (shouldLoad && userId) {
       setLoadingHistory(true)
-      fetch(`/api/visits/${userId}`)
+      fetch(apiUrl(`/api/visits/${userId}`))
         .then(r => r.json())
         .then(data => setHistory(Array.isArray(data) ? data : []))
         .catch(() => setHistory([]))
@@ -630,7 +631,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
   }, [shouldLoad, userId])
 
   const handleDeleteVisit = async (visitId) => {
-    await fetch(`/api/visits/${userId}/${visitId}`, { method: 'DELETE' })
+    await fetch(apiUrl(`/api/visits/${userId}/${visitId}`), { method: 'DELETE' })
     setHistory(prev => prev.filter(v => v.id !== visitId))
   }
 
@@ -647,11 +648,11 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
       const formData = new FormData()
       formData.append('file', file)
       formData.append('user_id', userId)
-      const res  = await fetch('/api/import/excel', { method: 'POST', body: formData })
+      const res  = await fetch(apiUrl('/api/import/excel'), { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Import failed')
       setImportMsg(`Imported ${data.imported} visit${data.imported !== 1 ? 's' : ''}`)
-      const updated = await fetch(`/api/visits/${userId}`).then(r => r.json())
+      const updated = await fetch(apiUrl(`/api/visits/${userId}`)).then(r => r.json())
       setHistory(Array.isArray(updated) ? updated : [])
     } catch (err) {
       setImportMsg(`Error: ${err.message}`)

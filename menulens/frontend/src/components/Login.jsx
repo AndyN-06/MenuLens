@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { apiUrl } from '../api'
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -14,7 +15,7 @@ function Login({ onLogin }) {
     setError(null)
 
     try {
-      const res = await fetch('/api/login', {
+      const res = await fetch(apiUrl('/api/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: name }),
