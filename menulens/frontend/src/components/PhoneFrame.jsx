@@ -39,18 +39,7 @@ function PhoneFrame({ children }) {
           overflow: 'hidden',
           position: 'relative',
         }}>
-          {/* Dynamic Island */}
-          <div style={{
-            position: 'absolute',
-            top: '12px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: '126px',
-            height: '37px',
-            backgroundColor: '#1c1c1e',
-            borderRadius: '20px',
-            zIndex: 100,
-          }} />
+          
 
           {/* App content — flex column so nav stays pinned at bottom */}
           <div style={{

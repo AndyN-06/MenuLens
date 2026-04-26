@@ -1,5 +1,42 @@
 import { useState, useEffect, useRef } from 'react'
 
+// ── Image compression helper ───────────────────────────────────────────────────
+
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 800
+        let w = img.width, h = img.height
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX }
+          else       { w = Math.round(w * MAX / h); h = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', 0.72))
+      }
+      img.src = e.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function IconCamera() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round"
+      style={{ width: '0.9rem', height: '0.9rem', display: 'block' }}>
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  )
+}
+
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
 function ratingColor(r) {
@@ -150,11 +187,13 @@ function DishPicker({ menuDishes, ratedKeys, onAdd, onClose }) {
 function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
   const [menuDishes,    setMenuDishes]    = useState([])
   const [loadingDishes, setLoadingDishes] = useState(false)
-  const [ratedDishes,   setRatedDishes]   = useState([])  // [{key, dish_id, dish_name, rating}]
+  const [ratedDishes,   setRatedDishes]   = useState([])  // [{key, dish_id, dish_name, rating, photo}]
   const [restaurantRating, setRestaurantRating] = useState('')
   const [pickerOpen,    setPickerOpen]    = useState(false)
   const [saving,        setSaving]        = useState(false)
   const [error,         setError]         = useState(null)
+  const [pendingPhotoKey, setPendingPhotoKey] = useState(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     if (!visit.restaurant_id) return
@@ -171,8 +210,21 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
   const handleAdd = ({ dish_id, dish_name }) => {
     const key = dish_id || `name:${dish_name}`
     if (ratedDishes.some(d => d.key === key)) return
-    setRatedDishes(prev => [...prev, { key, dish_id, dish_name, rating: '' }])
+    setRatedDishes(prev => [...prev, { key, dish_id, dish_name, rating: '', photo: null }])
     setPickerOpen(false)
+  }
+
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file || !pendingPhotoKey) { setPendingPhotoKey(null); return }
+    const compressed = await compressImage(file)
+    setRatedDishes(prev => prev.map(d => d.key === pendingPhotoKey ? { ...d, photo: compressed } : d))
+    setPendingPhotoKey(null)
+    e.target.value = ''
+  }
+
+  const handleRemovePhoto = (key) => {
+    setRatedDishes(prev => prev.map(d => d.key === key ? { ...d, photo: null } : d))
   }
 
   const handleRemove = (key) => {
@@ -216,9 +268,10 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
           body: JSON.stringify({
             restaurant_id: visit.restaurant_id || null,
             ratings: validRatings.map(d => ({
-              dish_id:   d.dish_id   || null,
-              dish_name: d.dish_id   ? null : d.dish_name,
-              rating:    parseFloat(d.rating),
+              dish_id:    d.dish_id || null,
+              dish_name:  d.dish_id ? null : d.dish_name,
+              rating:     parseFloat(d.rating),
+              photo_data: d.photo || null,
             })),
           }),
         })
@@ -268,6 +321,55 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
                 borderBottom: '1px solid var(--border)',
               }}
             >
+              {/* Photo thumbnail or camera button */}
+              <div style={{ position: 'relative', flexShrink: 0, width: '1.75rem', height: '1.75rem' }}>
+                {d.photo ? (
+                  <>
+                    <img
+                      src={d.photo}
+                      alt=""
+                      onClick={() => { setPendingPhotoKey(d.key); fileInputRef.current?.click() }}
+                      style={{
+                        width: '1.75rem', height: '1.75rem',
+                        objectFit: 'cover', borderRadius: '0.25rem',
+                        cursor: 'pointer', display: 'block',
+                      }}
+                      title="Change photo"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePhoto(d.key)}
+                      title="Remove photo"
+                      style={{
+                        position: 'absolute', top: '-0.35rem', right: '-0.35rem',
+                        width: '0.9rem', height: '0.9rem',
+                        borderRadius: '50%', border: 'none',
+                        background: 'var(--text-dim)', color: 'white',
+                        fontSize: '0.5rem', lineHeight: 1, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: 0,
+                      }}
+                    >✕</button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setPendingPhotoKey(d.key); fileInputRef.current?.click() }}
+                    title="Attach photo"
+                    style={{
+                      width: '1.75rem', height: '1.75rem',
+                      border: '1px dashed var(--border)', borderRadius: '0.25rem',
+                      background: 'none', cursor: 'pointer',
+                      color: 'var(--text-dim)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: 0,
+                    }}
+                  >
+                    <IconCamera />
+                  </button>
+                )}
+              </div>
+
               <span style={{ flex: 1, fontSize: '0.875rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {d.dish_name}
               </span>
@@ -368,6 +470,16 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
           {saving ? 'Saving…' : 'Save visit'}
         </button>
       </div>
+
+      {/* Hidden file input for photo capture */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handlePhotoSelect}
+        style={{ display: 'none' }}
+      />
     </div>
   )
 }

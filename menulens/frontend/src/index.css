@@ -53,7 +53,7 @@ body {
   font-family: var(--font);
   font-size: 16px;
   font-weight: 400;
-  background-color: var(--bg);
+  background-color: #1a1a2e;
   color: var(--text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -103,7 +103,7 @@ p {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background-color: var(--bg);
+  background-color: #1a1a2e;
 }
 
 .app-shell {
@@ -388,3 +388,74 @@ input[type="range"]:focus {
   box-shadow: none;
   border-color: transparent;
 }
+
+/* Collections grid (Profile screen) */
+.collections-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.collection-tile {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 12px 12px 11px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  font-family: inherit;
+  width: 100%;
+  min-width: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.collection-tile:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow);
+}
+
+.collection-glyph {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.collection-title {
+  display: block;
+  width: 100%;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collection-count {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.collection-green .collection-glyph { background: var(--green-tint); color: var(--green); }
+.collection-teal  .collection-glyph { background: var(--teal-tint);  color: var(--teal);  }
+.collection-amber .collection-glyph { background: var(--amber-tint); color: var(--amber); }

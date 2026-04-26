@@ -91,74 +91,12 @@ function Step2({ dietary, onDietaryChange }) {
   )
 }
 
-function Step3({ cuisines, favDish, onFavDishChange, favCuisine, onFavCuisineChange, favRating, onFavRatingChange }) {
-  return (
-    <div>
-      <h2 style={{ marginBottom: '0.35rem' }}>Got a favorite dish?</h2>
-      <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-        Optional — helps us fine-tune your picks right away.
-      </p>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-            Dish name
-          </label>
-          <input
-            type="text"
-            placeholder="e.g. Pad Thai"
-            value={favDish}
-            onChange={e => onFavDishChange(e.target.value)}
-          />
-        </div>
-
-        {cuisines.length > 0 && (
-          <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-              Cuisine
-            </label>
-            <select
-              value={favCuisine}
-              onChange={e => onFavCuisineChange(e.target.value)}
-            >
-              <option value="">Select cuisine…</option>
-              {cuisines.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-        )}
-
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
-              How much do you love it?
-            </label>
-            {favRating > 0 && (
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--green)' }}>
-                {favRating}/10
-              </span>
-            )}
-          </div>
-          <input
-            type="range"
-            min="1"
-            max="10"
-            value={favRating || 8}
-            onChange={e => onFavRatingChange(Number(e.target.value))}
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function Onboarding({ userId, onComplete }) {
   const [step, setStep]                         = useState(1)
   const [stepKey, setStepKey]                   = useState(0)
   const [selectedCuisines, setSelectedCuisines] = useState(new Set())
   const [dietary, setDietary]                   = useState('')
-  const [favDish, setFavDish]                   = useState('')
-  const [favCuisine, setFavCuisine]             = useState('')
-  const [favRating, setFavRating]               = useState(8)
   const [submitting, setSubmitting]             = useState(false)
   const [submitError, setSubmitError]           = useState(null)
 
@@ -182,22 +120,6 @@ function Onboarding({ userId, onComplete }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ restaurant_name: `${cuisine} cuisine`, cuisine_type: cuisine, restaurant_rating: 7, source: 'survey' }),
-        })
-      }
-
-      if (favDish.trim()) {
-        const cuisine = favCuisine || [...selectedCuisines][0] || ''
-        await fetch(`/api/visits/${userId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            restaurant_name: cuisine ? `${cuisine} cuisine` : 'My favorite',
-            cuisine_type: cuisine || null,
-            restaurant_rating: 7,
-            favorite_dish: favDish.trim(),
-            dish_rating: favRating,
-            source: 'survey',
-          }),
         })
       }
 
@@ -242,22 +164,11 @@ function Onboarding({ userId, onComplete }) {
         </div>
 
         <div className="card" style={{ padding: '1.75rem' }}>
-          <ProgressBar step={step} total={3} />
+          <ProgressBar step={step} total={2} />
 
           <div key={stepKey} className="step-in">
             {step === 1 && <Step1 selected={selectedCuisines} onToggle={toggleCuisine} />}
             {step === 2 && <Step2 dietary={dietary} onDietaryChange={setDietary} />}
-            {step === 3 && (
-              <Step3
-                cuisines={[...selectedCuisines]}
-                favDish={favDish}
-                onFavDishChange={setFavDish}
-                favCuisine={favCuisine}
-                onFavCuisineChange={setFavCuisine}
-                favRating={favRating}
-                onFavRatingChange={setFavRating}
-              />
-            )}
           </div>
 
           {submitError && (
@@ -276,7 +187,7 @@ function Onboarding({ userId, onComplete }) {
               )}
             </div>
             <div>
-              {step < 3 && (
+              {step < 2 && (
                 <button
                   className="primary"
                   onClick={goNext}
@@ -285,7 +196,7 @@ function Onboarding({ userId, onComplete }) {
                   Next →
                 </button>
               )}
-              {step === 3 && (
+              {step === 2 && (
                 <button
                   className="primary"
                   onClick={handleSubmit}

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Menulens — UI Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles.css?v=5"/>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="phone.jsx"></script>
+<script type="text/babel" src="screens.jsx"></script>
+
+<script type="text/babel">
+const { Phone } = ML;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "mood": "mellow",
+  "density": "compact",
+  "phoneStyle": "bezel"
+}/*EDITMODE-END*/;
+
+// Three palettes — each shifts canvas, app bg, surfaces, and accent together.
+const MOODS = {
+  mellow: {
+    canvas: '#efece5', canvas2: '#e6e2d8',
+    grain1: 'rgba(216,211,196,0.5)', grain2: 'rgba(202,196,178,0.45)',
+    ink: '#2a2823', inkMuted: '#6a665d', inkDim: '#9a958a', rule: 'rgba(42,40,35,0.12)',
+    bg: '#f7f6f4', surface: '#ffffff', surface2: '#f2f1ef',
+    border: '#e8e7e5', text: '#111110', textMuted: '#6e6d6b', textDim: '#a3a29f',
+    green: '#1a5c36', greenHover: '#154d2d', greenTint: '#e8f5ee',
+    teal: '#0d9488', tealTint: '#e0f7f4',
+    amber: '#b45309', amberTint: '#fef9ec',
+    red: '#c0392b', redTint: '#fdf0ee',
+  },
+  citrus: {
+    canvas: '#fbf4e4', canvas2: '#f5e8c8',
+    grain1: 'rgba(247,212,140,0.45)', grain2: 'rgba(238,193,116,0.40)',
+    ink: '#2b2210', inkMuted: '#6a5d3e', inkDim: '#a89c7a', rule: 'rgba(43,34,16,0.14)',
+    bg: '#fdf8eb', surface: '#ffffff', surface2: '#f7eed6',
+    border: '#ecdfb8', text: '#1a1505', textMuted: '#6e6240', textDim: '#a89c7a',
+    green: '#a04d10', greenHover: '#854008', greenTint: '#fcecd1',
+    teal: '#b8810f', tealTint: '#fbf0cf',
+    amber: '#7a3e0a', amberTint: '#fde6c2',
+    red: '#a8331a', redTint: '#fce6dd',
+  },
+  twilight: {
+    canvas: '#dfdde5', canvas2: '#cfcdd9',
+    grain1: 'rgba(195,190,217,0.55)', grain2: 'rgba(160,158,189,0.45)',
+    ink: '#211e2e', inkMuted: '#5a567a', inkDim: '#9491ab', rule: 'rgba(33,30,46,0.14)',
+    bg: '#ecebf2', surface: '#ffffff', surface2: '#e3e1ed',
+    border: '#d8d5e3', text: '#15132a', textMuted: '#605c80', textDim: '#9d9ab5',
+    green: '#3e3a8a', greenHover: '#322f73', greenTint: '#e2e0f4',
+    teal: '#5e3a8a', tealTint: '#ebe2f5',
+    amber: '#7a4a8a', amberTint: '#f1e6f5',
+    red: '#a83a6c', redTint: '#f7e2ec',
+  },
+};
+
+const DENSITIES = {
+  cozy:     { pagePad: '96px 64px 140px', sectionGap: 120, sectionMb: 56, rowGap: 64, scale: 1.06,
+              phonePadV: 56, headFs: 60, sectionFs: 30, cardPad: '1.5rem', screenPad: '1.5rem 1.25rem 1.25rem' },
+  standard: { pagePad: '80px 56px 120px', sectionGap: 96,  sectionMb: 48, rowGap: 56, scale: 1,
+              phonePadV: 44, headFs: 56, sectionFs: 28, cardPad: '1.25rem', screenPad: '1.25rem 1rem 1rem' },
+  compact:  { pagePad: '56px 40px 96px',  sectionGap: 64,  sectionMb: 32, rowGap: 36, scale: 0.94,
+              phonePadV: 32, headFs: 44, sectionFs: 22, cardPad: '1rem',     screenPad: '1rem 0.75rem 0.75rem' },
+};
+
+function applyTheme(t) {
+  const m = MOODS[t.mood] || MOODS.mellow;
+  const d = DENSITIES[t.density] || DENSITIES.standard;
+  const r = document.documentElement.style;
+
+  // Mood
+  r.setProperty('--canvas', m.canvas);
+  r.setProperty('--canvas-2', m.canvas2);
+  r.setProperty('--ink', m.ink);
+  r.setProperty('--ink-muted', m.inkMuted);
+  r.setProperty('--ink-dim', m.inkDim);
+  r.setProperty('--rule', m.rule);
+  r.setProperty('--bg', m.bg);
+  r.setProperty('--surface', m.surface);
+  r.setProperty('--surface-2', m.surface2);
+  r.setProperty('--border', m.border);
+  r.setProperty('--text', m.text);
+  r.setProperty('--text-muted', m.textMuted);
+  r.setProperty('--text-dim', m.textDim);
+  r.setProperty('--green', m.green);
+  r.setProperty('--green-hover', m.greenHover);
+  r.setProperty('--green-tint', m.greenTint);
+  r.setProperty('--teal', m.teal);
+  r.setProperty('--teal-tint', m.tealTint);
+  r.setProperty('--amber', m.amber);
+  r.setProperty('--amber-tint', m.amberTint);
+  r.setProperty('--red', m.red);
+  r.setProperty('--red-tint', m.redTint);
+  r.setProperty('--grain-1', m.grain1);
+  r.setProperty('--grain-2', m.grain2);
+
+  // Density
+  r.setProperty('--page-pad', d.pagePad);
+  r.setProperty('--section-gap', d.sectionGap + 'px');
+  r.setProperty('--section-mb', d.sectionMb + 'px');
+  r.setProperty('--row-gap', d.rowGap + 'px');
+  r.setProperty('--head-fs', d.headFs + 'px');
+  r.setProperty('--section-fs', d.sectionFs + 'px');
+  r.setProperty('--card-pad', d.cardPad);
+  r.setProperty('--screen-pad', d.screenPad);
+  r.setProperty('--phone-scale', d.scale);
+}
+
+function PhoneCard({ num, label, desc, time, phoneStyle, children }) {
+  return (
+    <div className={`phone-card phone-${phoneStyle}`}>
+      <Phone time={time}>{children}</Phone>
+      <div className="phone-meta">
+        <div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <span className="num">{num}</span>
+            <span className="label">{label}</span>
+          </div>
+          <div className="desc">{desc}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({ num, title, blurb, children }) {
+  return (
+    <section className="section" data-screen-label={`${num} ${title}`}>
+      <div className="section-head">
+        <span className="section-num">{num}</span>
+        <span className="section-title">{title}</span>
+        {blurb && <span className="section-blurb">{blurb}</span>}
+      </div>
+      <div className="row">{children}</div>
+    </section>
+  );
+}
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  React.useEffect(() => { applyTheme(t); }, [t.mood, t.density]);
+
+  const ps = t.phoneStyle;
+
+  // pass phoneStyle down to PhoneCard via clone
+  const Card = (props) => <PhoneCard {...props} phoneStyle={ps}/>;
+
+  return (
+    <div className={`page ps-${ps}`}>
+      <header className="masthead">
+        <div>
+          <div className="brand-mark">
+            <div className="logo"><ML.I.Logo width="22" height="22"/></div>
+            <div>
+              <div className="wordmark">Menulens</div>
+              <div className="tagline">Personalized menu recommendations</div>
+            </div>
+          </div>
+          <h1 style={{ marginTop: 36 }}>UI mockups,<br/>screen by screen.</h1>
+          <p className="lede">
+            Every screen a Menulens user touches — from first sign-in through scanning a menu,
+            getting their picks, and logging meals. Designed in a single mellow, warm palette.
+          </p>
+        </div>
+        <div className="meta">v1 · Apr 2026 · 11 screens</div>
+      </header>
+
+      <Section num="01" title="Onboarding" blurb="First-time users land here. A gentle two-step taste profile follows the welcome screen.">
+        <Card num="01.1" label="Welcome" desc="Username sign-in. New users continue to onboarding; returning users go straight to Scan.">
+          <Screens.Login/>
+        </Card>
+        <Card num="01.2" label="Cuisines" desc="Step 1 of 2 — multi-select grid of cuisines to seed the recommender.">
+          <Screens.Onboarding1/>
+        </Card>
+        <Card num="01.3" label="Dietary" desc="Step 2 of 2 — free-form restrictions. Optional, applied as a hard filter on results.">
+          <Screens.Onboarding2/>
+        </Card>
+      </Section>
+
+      <Section num="02" title="Scan flow" blurb="The core loop: pick a restaurant, scan or reuse its menu, get ranked picks.">
+        <Card num="02.1" label="Home — Scan tab" desc="Restaurant search at top, three personalized recommendations below for ambient discovery.">
+          <Screens.ScanIdle/>
+        </Card>
+        <Card num="02.2" label="Restaurant selected" desc="When the chosen restaurant already has a saved menu, skip the scan and go straight to ranking.">
+          <Screens.ExistingMenu/>
+        </Card>
+        <Card num="02.3" label="Upload menu" desc="Drag-and-drop or tap to upload. Accepts JPEG, PNG, or PDF.">
+          <Screens.Uploader/>
+        </Card>
+        <Card num="02.4" label="Processing" desc="OCR + LLM parse runs on the server. Streamed events update the spinner state.">
+          <Screens.Uploader processing/>
+        </Card>
+        <Card num="02.5" label="Your picks" desc="Dishes grouped by match level. Green border on great matches; community pills surface popular orders.">
+          <Screens.Results/>
+        </Card>
+      </Section>
+
+      <Section num="03" title="My List & Profile" blurb="Where users come back to log what they actually ate, and tend their taste profile.">
+        <Card num="03.1" label="My List" desc="Pending visits sit at top awaiting ratings; permanent meal history below.">
+          <Screens.MyList/>
+        </Card>
+        <Card num="03.2" label="Profile" desc="At-a-glance taste profile, plus auto-curated Collections drawn from rating history.">
+          <Screens.Profile/>
+        </Card>
+        <Card num="03.3" label="Collection detail" desc="Tap a collection to see the dishes inside, ranked by rating with restaurant and date.">
+          <Screens.CollectionDetail/>
+        </Card>
+      </Section>
+
+      <footer className="colophon">
+        <span>Menulens · UI mockups</span>
+        <span>11 screens · Inter / system</span>
+      </footer>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="Mood"/>
+        <TweakRadio
+          label="Palette"
+          value={t.mood}
+          options={['mellow', 'citrus', 'twilight']}
+          onChange={(v) => setTweak('mood', v)}
+        />
+        <TweakSection label="Layout"/>
+        <TweakRadio
+          label="Density"
+          value={t.density}
+          options={['cozy', 'standard', 'compact']}
+          onChange={(v) => setTweak('density', v)}
+        />
+        <TweakSection label="Presentation"/>
+        <TweakRadio
+          label="Phone style"
+          value={t.phoneStyle}
+          options={['bezel', 'floating', 'paper']}
+          onChange={(v) => setTweak('phoneStyle', v)}
+        />
+      </TweaksPanel>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

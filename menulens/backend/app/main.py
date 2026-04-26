@@ -163,9 +163,10 @@ class RestaurantCreate(BaseModel):
 
 
 class DishRatingCreate(BaseModel):
-    dish_id:   Optional[str] = None   # UUID of a known dish
-    dish_name: Optional[str] = None   # fallback when dish not in DB yet
-    rating:    float                  # 1.00–10.00, up to 2 decimal places
+    dish_id:    Optional[str] = None   # UUID of a known dish
+    dish_name:  Optional[str] = None   # fallback when dish not in DB yet
+    rating:     float                  # 1.00–10.00, up to 2 decimal places
+    photo_data: Optional[str] = None   # base64 data-URI of an attached photo
 
 
 class DishRatingsPayload(BaseModel):
@@ -927,6 +928,7 @@ def rate_dishes(
             continue
 
         clamped = round(max(1.0, min(10.0, float(r.rating))), 2)
+        notes_val = _json.dumps({"photo": r.photo_data}) if r.photo_data else None
         db.add(DishRating(
             id=uuid.uuid4(),
             user_id=uid,
@@ -934,6 +936,7 @@ def rate_dishes(
             restaurant_id=dish.restaurant_id,
             visit_id=vid,
             rating=clamped,
+            notes=notes_val,
         ))
         saved += 1
 
@@ -959,11 +962,19 @@ def get_visit_dishes(
         raise HTTPException(status_code=404, detail="Visit not found")
 
     ratings = db.query(DishRating).filter(DishRating.visit_id == vid).all()
+    def _parse_photo(notes_str):
+        if not notes_str:
+            return None
+        try:
+            return _json.loads(notes_str).get("photo")
+        except Exception:
+            return None
+
     return [
         {
             "dish_rating_id": str(dr.id),
             "rating": dr.rating,
-            "notes": dr.notes,
+            "photo": _parse_photo(dr.notes),
             "rated_at": dr.rated_at.isoformat() if dr.rated_at else None,
             "dish": _dish_to_dict(dr.dish) if dr.dish else None,
         }
