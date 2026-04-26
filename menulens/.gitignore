@@ -53,3 +53,10 @@ Thumbs.db
 
 # Alembic
 backend/alembic/versions/*.pyc
+
+# Images
+images/
+
+# Markdown docs (keep only README.md)
+*.md
+!README.md

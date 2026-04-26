@@ -1,18 +1,18 @@
 # MenuLens
 
-A full-stack web app that extracts text from restaurant menu photos using OCR.
+A full-stack web app that scans restaurant menus and gives you personalized dish recommendations based on your taste profile.
 
-## Current Status: Slice 1 Complete
+## How it works
 
-**Slice 1** implements the OCR pipeline:
-- Upload menu image (drag & drop or file picker)
-- Extract text using EasyOCR
-- Display results in a collapsible view
+1. Search for a restaurant (or add a new one)
+2. Upload a photo or PDF of the menu — Claude Vision parses it into structured dishes
+3. Get ranked dish recommendations scored against your taste profile
+4. Log visits and rate dishes to improve future recommendations
 
 ## Tech Stack
 
-- **Backend**: FastAPI (Python 3.11), EasyOCR
-- **Frontend**: React 18, Vite
+- **Backend**: FastAPI (Python 3.11), PostgreSQL, Claude API (Anthropic)
+- **Frontend**: React 18, Vite — rendered inside a phone frame UI
 - **Deployment**: Docker, Docker Compose
 
 ## Project Structure
@@ -25,46 +25,44 @@ menulens/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── app/
-│       ├── __init__.py
-│       ├── main.py          # FastAPI app with /health and /api/ocr endpoints
-│       └── ocr.py           # EasyOCR wrapper
+│       ├── main.py       # FastAPI app + all API endpoints
+│       ├── llm.py        # Claude API calls (menu parsing, taste summarization)
+│       ├── scoring.py    # Formula-based dish ranking against taste profile
+│       ├── models.py     # SQLAlchemy ORM models
+│       └── database.py   # DB connection / session
 └── frontend/
     ├── index.html
     ├── package.json
     ├── vite.config.js
     └── src/
         ├── main.jsx
-        ├── App.jsx          # Main app with stage machine
-        ├── index.css        # Dark editorial design system
+        ├── App.jsx           # App shell, state machine, all tabs
+        ├── index.css         # Design system (Beli-inspired light theme)
         └── components/
-            ├── Uploader.jsx    # Drag/drop uploader with stage-aware labels
-            └── OcrResult.jsx   # Collapsible OCR results display
+            ├── PhoneFrame.jsx       # iPhone-style wrapper
+            ├── Uploader.jsx         # Drag/drop menu uploader
+            ├── DishCards.jsx        # Ranked dish results
+            ├── Onboarding.jsx       # Taste profile setup flow
+            ├── RestaurantSearch.jsx # Search/select restaurant
+            ├── NewRestaurantForm.jsx
+            ├── LogMealForm.jsx      # Manual meal logging + dish ratings
+            └── MyMealsPanel.jsx     # Visit history and pending visits
 ```
 
 ## Getting Started
 
 ### Option 1: Docker (Recommended)
 
-1. **Start the backend with Docker Compose**:
-   ```bash
-   cd menulens
-   docker-compose up --build
-   ```
+```bash
+cd menulens
+docker-compose up --build
+```
 
-   The backend will be available at http://localhost:8000
+Backend at http://localhost:8000, frontend at http://localhost:5173.
 
-2. **Install frontend dependencies and start dev server**:
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+### Option 2: Local Development
 
-   The frontend will be available at http://localhost:5173
-
-### Option 2: Local Development (Without Docker)
-
-**Backend**:
+**Backend** (requires PostgreSQL running):
 ```bash
 cd menulens/backend
 pip install -r requirements.txt
@@ -80,58 +78,31 @@ npm run dev
 
 ## API Endpoints
 
-### GET /health
-Basic health check.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/api/login` | Username-based login / account creation |
+| GET | `/api/restaurants/search?q=` | Search restaurants by name |
+| POST | `/api/restaurants` | Create a new restaurant |
+| GET | `/api/restaurants/{id}/menu` | Get a restaurant's saved menu |
+| POST | `/api/recommend/stream` | Upload menu image/PDF → SSE stream → parsed dishes |
+| POST | `/api/recommend/rank` | Score + rank a dish list against a user's taste profile |
+| GET | `/api/profile/{user_id}` | Get taste profile |
+| POST | `/api/profile/{user_id}` | Create / replace taste profile |
+| PATCH | `/api/profile/{user_id}` | Patch taste profile fields |
+| POST | `/api/profile/{user_id}/recompute` | Recompute profile from visit history |
+| GET | `/api/visits/{user_id}` | Get visit history |
+| POST | `/api/visits/{user_id}` | Log a visit |
+| POST | `/api/visits/{user_id}/{visit_id}/dishes` | Rate dishes from a visit |
+| DELETE | `/api/visits/{user_id}/{visit_id}` | Delete a visit |
+| POST | `/api/import/excel` | Bulk import visits from Excel |
 
-**Response**:
-```json
-{
-  "status": "ok",
-  "service": "menulens-backend"
-}
-```
+## Data Model
 
-### POST /api/ocr
-Extract text from an uploaded menu image.
-
-**Request**: multipart/form-data with `file` field
-
-**Response**:
-```json
-{
-  "filename": "menu.jpg",
-  "text": "Extracted text here...",
-  "char_count": 523
-}
-```
-
-## Usage
-
-1. Open http://localhost:5173 in your browser
-2. Upload a menu photo (drag & drop or click to browse)
-3. Wait for OCR processing (10-30 seconds)
-4. View the extracted text results
-5. Upload another menu to try again
-
-## Notes
-
-- **First OCR call may be slow** as EasyOCR downloads language models on first use
-- **Image quality matters**: Clear, well-lit photos with legible text work best
-- **No authentication**: This is an MVP focused on the core OCR functionality
-
-## Next Steps (Future Slices)
-
-- **Slice 2**: LLM parsing (convert raw OCR text → structured dish JSON)
-- **Slice 3**: Taste profile onboarding + PostgreSQL persistence
-- **Slice 4**: Personalized dish ranking using user preferences
-
-## Design System
-
-The frontend uses a dark editorial theme with:
-- Colors: Dark backgrounds (#0d0d0d) with gold accents (#e8c97a)
-- Fonts: DM Serif Display (headings), Outfit (body), DM Mono (code/data)
-- All design tokens defined in `frontend/src/index.css`
-
----
-
-Built with FastAPI, React, and EasyOCR
+- **User** — username-based, no passwords
+- **Restaurant** — name, cuisine type, city
+- **Menu** — one per restaurant; stores parsed dishes + scan metadata
+- **Dish** — dish name, description, price, section, flavor vector
+- **TasteProfile** — per-user; cuisine affinities, liked/disliked ingredients, flavor preferences; auto-recomputed from ratings
+- **RestaurantVisit** — a logged visit linking user → restaurant → menu
+- **DishRating** — per-dish rating (1–10) attached to a visit
