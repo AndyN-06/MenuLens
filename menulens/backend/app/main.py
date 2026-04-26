@@ -122,6 +122,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
+        "https://menulens-mu.vercel.app",
         os.environ.get("FRONTEND_URL", ""),   # set this in Railway
     ],
     allow_credentials=True,
