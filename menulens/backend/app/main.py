@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 import asyncio
 import json as _json
+import os
 import uuid
 import logging
 import traceback
@@ -118,7 +119,11 @@ app = FastAPI(title="MenuLens API", version="4.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        os.environ.get("FRONTEND_URL", ""),   # set this in Railway
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
