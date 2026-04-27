@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { apiUrl } from '../api'
 
 const CUISINES = [
   { name: 'Thai',           flag: '🇹🇭' },

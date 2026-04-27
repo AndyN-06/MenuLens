@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiUrl } from '../api'
 
 // ── Image compression helper ───────────────────────────────────────────────────
 

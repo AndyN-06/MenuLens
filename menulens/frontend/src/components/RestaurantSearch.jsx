@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiUrl } from '../api'
 
 function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
   const [query, setQuery]     = useState('')
