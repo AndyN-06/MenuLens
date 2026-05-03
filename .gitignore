@@ -68,3 +68,4 @@ images/
 !README.md
 *.docx
 
+.claude/

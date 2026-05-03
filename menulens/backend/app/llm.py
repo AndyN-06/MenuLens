@@ -1,7 +1,7 @@
 """
 LLM module — Claude Vision replaces the previous OCR + Ollama pipeline.
 
-A single API call to claude-opus-4-5 reads the menu image directly and
+A single API call to Claude reads the menu image directly and
 returns structured JSON. No OCR step, no chunking, no retry loops for
 cleaning text.
 """
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 _client: anthropic.Anthropic | None = None
 
-ANTHROPIC_MODEL      = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-5")
+ANTHROPIC_MODEL      = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 
 # Maximum long-edge pixel dimension before resizing.
@@ -198,6 +198,127 @@ def _salvage_objects(text: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Output validation
+# ---------------------------------------------------------------------------
+
+def _is_jargon(name: str) -> bool:
+    """Return True if a dish name looks like OCR garbage or a non-dish string."""
+    # Non-ASCII heavy (e.g. corrupted encoding)
+    non_ascii = sum(1 for c in name if ord(c) > 127)
+    if non_ascii / len(name) > 0.3:
+        return True
+    # OCR artifact characters
+    if any(c in name for c in ("%", "|", "=", "#")):
+        return True
+    # Barcode / serial-number pattern: only digits, uppercase letters, hyphens
+    if re.match(r'^[\dA-Z\-]{6,}$', name.upper()):
+        return True
+    # All-caps token with no vowels (≥ 5 chars, single word)
+    tokens = name.split()
+    if len(tokens) == 1 and len(name) >= 5 and name.isupper():
+        if not re.search(r'[AEIOU]', name.upper()):
+            return True
+    return False
+
+
+def validate_parsed_dishes(parsed: dict) -> tuple[dict, dict]:
+    """Validate and clean LLM-parsed menu output.
+
+    Filters out dishes with bad names, coerces optional fields, and detects
+    if a suspiciously large fraction of dish names look like jargon/garbage.
+
+    Returns:
+        cleaned: dict with the same shape as *parsed* but with invalid dishes
+                 removed and optional fields coerced to strings.
+        report:  {
+            "total": int,
+            "accepted": int,
+            "rejected": int,
+            "field_failures": {"dish_name": int, "price": int,
+                               "description": int, "section": int},
+            "jargon_count": int,
+            "jargon_fraction": float,
+            "jargon_warning": bool,
+        }
+    """
+    field_failures: dict[str, int] = {
+        "dish_name": 0, "price": 0, "description": 0, "section": 0
+    }
+    accepted: list[dict] = []
+    jargon_count = 0
+
+    for raw in parsed.get("dishes", []):
+        # ── dish_name (required) ─────────────────────────────────────────────
+        name = raw.get("dish_name", "")
+        if not isinstance(name, str):
+            field_failures["dish_name"] += 1
+            continue
+        name = name.strip()
+        if not name:
+            field_failures["dish_name"] += 1
+            continue
+        if len(name) > 300:
+            field_failures["dish_name"] += 1
+            continue
+        # Reject pure-numeric strings like "12" or "3.50"
+        try:
+            float(name)
+            field_failures["dish_name"] += 1
+            continue
+        except ValueError:
+            pass
+        # Reject strings with fewer than 2 alphabetic characters
+        if sum(1 for c in name if c.isalpha()) < 2:
+            field_failures["dish_name"] += 1
+            continue
+
+        # ── optional fields (coerce, don't reject) ───────────────────────────
+        price = raw.get("price", "")
+        if not isinstance(price, str):
+            field_failures["price"] += 1
+            price = str(price) if price is not None else ""
+
+        description = raw.get("description", "")
+        if not isinstance(description, str):
+            field_failures["description"] += 1
+            description = str(description) if description is not None else ""
+        if len(description) > 2000:
+            description = description[:2000]
+
+        section = raw.get("section", "")
+        if not isinstance(section, str):
+            field_failures["section"] += 1
+            section = str(section) if section is not None else ""
+        if len(section) > 100:
+            section = section[:100]
+
+        dish = {**raw, "dish_name": name, "price": price,
+                "description": description, "section": section}
+        accepted.append(dish)
+
+        if _is_jargon(name):
+            jargon_count += 1
+
+    total = len(parsed.get("dishes", []))
+    rejected = total - len(accepted)
+    jargon_fraction = jargon_count / len(accepted) if accepted else 0.0
+    jargon_warning = jargon_fraction > 0.40
+
+    report = {
+        "total": total,
+        "accepted": len(accepted),
+        "rejected": rejected,
+        "field_failures": field_failures,
+        "jargon_count": jargon_count,
+        "jargon_fraction": round(jargon_fraction, 3),
+        "jargon_warning": jargon_warning,
+    }
+
+    cleaned = {**parsed, "dishes": accepted}
+    return cleaned, report
+
+
+# ---------------------------------------------------------------------------
 # Core: single Claude Vision call
 # ---------------------------------------------------------------------------
 
@@ -273,22 +394,33 @@ def parse_menu_image(image_data: bytes) -> dict:
         return _EMPTY
 
     if isinstance(result, list):
-        return {"restaurant_name": "", "cuisine_type": "", "dishes": result}
-
-    if isinstance(result, dict):
+        raw_parsed = {"restaurant_name": "", "cuisine_type": "", "dishes": result}
+    elif isinstance(result, dict):
         dishes = result.get("dishes", [])
-        merged = {
+        raw_parsed = {
             "restaurant_name": str(result.get("restaurant_name") or ""),
             "cuisine_type": str(result.get("cuisine_type") or ""),
             "dishes": dishes if isinstance(dishes, list) else [],
         }
-        logger.info(
-            f"[llm] parse_menu_image done -- {len(merged['dishes'])} dishes, "
-            f"restaurant='{merged['restaurant_name']}', cuisine='{merged['cuisine_type']}'"
-        )
-        return merged
+    else:
+        return _EMPTY
 
-    return _EMPTY
+    cleaned, report = validate_parsed_dishes(raw_parsed)
+    if report["rejected"]:
+        logger.warning(
+            f"[llm] validation: {report['rejected']}/{report['total']} dishes rejected | "
+            f"field_failures={report['field_failures']}"
+        )
+    if report["jargon_warning"]:
+        logger.warning(
+            f"[llm] jargon warning: {report['jargon_fraction']:.0%} of accepted dishes "
+            f"look like garbage ({report['jargon_count']} flagged)"
+        )
+    logger.info(
+        f"[llm] parse_menu_image done -- {report['accepted']} dishes accepted, "
+        f"restaurant='{cleaned['restaurant_name']}', cuisine='{cleaned['cuisine_type']}'"
+    )
+    return cleaned
 
 
 def parse_menu_pdf(pdf_data: bytes) -> dict:
@@ -342,22 +474,33 @@ def parse_menu_pdf(pdf_data: bytes) -> dict:
         return _EMPTY
 
     if isinstance(result, list):
-        return {"restaurant_name": "", "cuisine_type": "", "dishes": result}
-
-    if isinstance(result, dict):
+        raw_parsed = {"restaurant_name": "", "cuisine_type": "", "dishes": result}
+    elif isinstance(result, dict):
         dishes = result.get("dishes", [])
-        merged = {
+        raw_parsed = {
             "restaurant_name": str(result.get("restaurant_name") or ""),
             "cuisine_type": str(result.get("cuisine_type") or ""),
             "dishes": dishes if isinstance(dishes, list) else [],
         }
-        logger.info(
-            f"[llm] parse_menu_pdf done -- {len(merged['dishes'])} dishes, "
-            f"restaurant='{merged['restaurant_name']}', cuisine='{merged['cuisine_type']}'"
-        )
-        return merged
+    else:
+        return _EMPTY
 
-    return _EMPTY
+    cleaned, report = validate_parsed_dishes(raw_parsed)
+    if report["rejected"]:
+        logger.warning(
+            f"[llm] validation: {report['rejected']}/{report['total']} dishes rejected | "
+            f"field_failures={report['field_failures']}"
+        )
+    if report["jargon_warning"]:
+        logger.warning(
+            f"[llm] jargon warning: {report['jargon_fraction']:.0%} of accepted dishes "
+            f"look like garbage ({report['jargon_count']} flagged)"
+        )
+    logger.info(
+        f"[llm] parse_menu_pdf done -- {report['accepted']} dishes accepted, "
+        f"restaurant='{cleaned['restaurant_name']}', cuisine='{cleaned['cuisine_type']}'"
+    )
+    return cleaned
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,11 @@
       "Bash(pkill -f \"uvicorn\")",
       "WebFetch(domain:api.anthropic.com)",
       "Bash(npm run:*)",
-      "Bash(xxd \"/c/Users/andre/OneDrive/Desktop/MenuLens/menulens/frontend/.env.production\")"
+      "Bash(xxd \"/c/Users/andre/OneDrive/Desktop/MenuLens/menulens/frontend/.env.production\")",
+      "Bash(sed -i 's/claude-opus-4-5/claude-haiku-4-5-20251001/g' \"c:/Users/andre/OneDrive/Desktop/MenuLens/menulens/backend/app/llm.py\")",
+      "Bash(sed -i 's/claude-sonnet-4-6/claude-haiku-4-5-20251001/g' \"c:/Users/andre/OneDrive/Desktop/MenuLens/menulens/docker-compose.yml\")",
+      "Bash(sed -i 's/claude-sonnet-4-6/claude-haiku-4-5-20251001/g' \"c:/Users/andre/OneDrive/Desktop/MenuLens/menulens/.env\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\andre\\\\OneDrive\\\\Desktop\\\\MenuLens\\\\menulens\\\\backend\\\\app\\\\\" -Recurse -File | Select-Object FullName | head -50)"
     ]
   }
 }

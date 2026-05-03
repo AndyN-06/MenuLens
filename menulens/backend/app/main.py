@@ -9,11 +9,13 @@ import os
 import uuid
 import logging
 import traceback
+import time
+import threading
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -21,6 +23,7 @@ from sqlalchemy import text
 from .llm import (
     parse_menu_image,
     parse_menu_pdf,
+    validate_parsed_dishes,
     health_check_anthropic,
     summarize_taste_profile,
     _get_client,
@@ -36,6 +39,28 @@ from .models import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_MENU_TTL   = 300   # 5 min
+_SEARCH_TTL = 120   # 2 min
+_cache: dict = {}
+_cache_lock = threading.Lock()
+
+def _cache_get(key: str):
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and time.monotonic() < entry[1]:
+            return entry[0]
+        if entry:
+            del _cache[key]
+        return None
+
+def _cache_set(key: str, value, ttl: int):
+    with _cache_lock:
+        _cache[key] = (value, time.monotonic() + ttl)
+
+def _cache_delete(key: str):
+    with _cache_lock:
+        _cache.pop(key, None)
 
 
 def _is_image(content_type: str) -> bool:
@@ -384,6 +409,8 @@ def _upsert_menu(
 
     db.commit()
     db.refresh(new_menu)
+    _cache_delete(f"menu:{restaurant_id}")
+    logger.info("[cache] EVICT key=menu:%s", restaurant_id)
     return new_menu
 
 
@@ -637,6 +664,12 @@ def create_user(db: Session = Depends(get_db)):
 def search_restaurants(q: str, limit: int = 10, db: Session = Depends(get_db)):
     if not q or len(q.strip()) < 2:
         return []
+    cache_key = f"search:{q.strip().lower()}:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        logger.info("[cache] HIT  key=%s", cache_key)
+        return JSONResponse(content=cached, headers={"Cache-Control": f"public, max-age={_SEARCH_TTL}"})
+    logger.info("[cache] MISS key=%s", cache_key)
     results = (
         db.query(Restaurant)
         .filter(Restaurant.name.ilike(f"%{q.strip()}%"))
@@ -644,7 +677,7 @@ def search_restaurants(q: str, limit: int = 10, db: Session = Depends(get_db)):
         .limit(limit)
         .all()
     )
-    return [
+    data = [
         {
             "id": str(r.id),
             "name": r.name,
@@ -657,6 +690,8 @@ def search_restaurants(q: str, limit: int = 10, db: Session = Depends(get_db)):
         }
         for r in results
     ]
+    _cache_set(cache_key, data, _SEARCH_TTL)
+    return JSONResponse(content=data, headers={"Cache-Control": f"public, max-age={_SEARCH_TTL}"})
 
 
 @app.post("/api/restaurants", status_code=201)
@@ -675,12 +710,18 @@ def create_restaurant(payload: RestaurantCreate, db: Session = Depends(get_db)):
 
 @app.get("/api/restaurants/{restaurant_id}/menu")
 def get_restaurant_menu(restaurant_id: str, db: Session = Depends(get_db)):
-    rid  = _parse_uuid(restaurant_id)
+    rid = _parse_uuid(restaurant_id)
+    cache_key = f"menu:{rid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        logger.info("[cache] HIT  key=%s", cache_key)
+        return JSONResponse(content=cached, headers={"Cache-Control": f"public, max-age={_MENU_TTL}"})
+    logger.info("[cache] MISS key=%s", cache_key)
     menu = db.query(Menu).filter(Menu.restaurant_id == rid).first()
     if not menu:
         raise HTTPException(status_code=404, detail="No menu scanned for this restaurant")
     dishes = db.query(Dish).filter(Dish.menu_id == menu.id).all()
-    return {
+    data = {
         "menu_id": str(menu.id),
         "restaurant_id": str(menu.restaurant_id),
         "scanned_at": menu.scanned_at.isoformat(),
@@ -688,6 +729,8 @@ def get_restaurant_menu(restaurant_id: str, db: Session = Depends(get_db)):
         "dish_count": menu.dish_count,
         "dishes": [_dish_to_dict(d) for d in dishes],
     }
+    _cache_set(cache_key, data, _MENU_TTL)
+    return JSONResponse(content=data, headers={"Cache-Control": f"public, max-age={_MENU_TTL}"})
 
 
 @app.post("/api/restaurants/{restaurant_id}/menu/verify")
@@ -1222,6 +1265,7 @@ async def recommend_stream(
 
                 _sse({"type": "log", "message": f"[Claude] Analyzing {filename}..."})
                 parsed          = parse_menu_pdf(image_data) if is_pdf else parse_menu_image(image_data)
+                _, val_report   = validate_parsed_dishes(parsed)
                 dishes          = parsed.get("dishes", [])
                 restaurant_name = parsed.get("restaurant_name", "")
                 cuisine_type    = parsed.get("cuisine_type", "")
@@ -1232,6 +1276,23 @@ async def recommend_stream(
                         f"restaurant='{restaurant_name}' cuisine='{cuisine_type}'"
                     ),
                 })
+                _sse({"type": "validation", "data": val_report})
+                if val_report["rejected"]:
+                    _sse({
+                        "type": "log",
+                        "message": (
+                            f"[Validation] {val_report['rejected']} dish(es) rejected "
+                            f"(bad name) | field_failures={val_report['field_failures']}"
+                        ),
+                    })
+                if val_report["jargon_warning"]:
+                    _sse({
+                        "type": "log",
+                        "message": (
+                            f"[Validation] Warning: {val_report['jargon_fraction']:.0%} of dishes "
+                            f"appear to be jargon or OCR garbage — scan quality may be low"
+                        ),
+                    })
 
                 # Persist menu if a restaurant_id was provided
                 new_menu = None

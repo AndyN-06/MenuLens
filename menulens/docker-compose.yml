@@ -36,7 +36,7 @@ services:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://menulens:menulens@db:5432/menulens
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
     depends_on:
       db:
         condition: service_healthy
