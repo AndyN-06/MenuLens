@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { apiUrl } from '../api'
+import { apiFetch } from '../api'
 
 const CUISINES = [
   { name: 'Thai',           flag: '🇹🇭' },
@@ -117,24 +117,21 @@ function Onboarding({ userId, onComplete }) {
     setSubmitError(null)
     try {
       for (const cuisine of selectedCuisines) {
-        await fetch(apiUrl(`/api/visits/${userId}`), {
+        await apiFetch(`/api/visits/${userId}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ restaurant_name: `${cuisine} cuisine`, cuisine_type: cuisine, restaurant_rating: 7, source: 'survey' }),
         })
       }
 
       const restrictions = dietary ? dietary.split(',').map(s => s.trim()).filter(Boolean) : []
       if (restrictions.length > 0) {
-        const res = await fetch(apiUrl(`/api/profile/${userId}`), {
+        const res = await apiFetch(`/api/profile/${userId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dietary_restrictions: restrictions }),
         })
         if (res.status === 404) {
-          await fetch(apiUrl(`/api/profile/${userId}`), {
+          await apiFetch(`/api/profile/${userId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ dietary_restrictions: restrictions }),
           })
         }

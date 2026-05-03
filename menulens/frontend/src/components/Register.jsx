@@ -1,28 +1,35 @@
 import { useState } from 'react'
 import { apiFetch } from '../api'
 
-function Login({ onLogin, onRegister }) {
+function Register({ onLogin, onBack }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [confirm,  setConfirm]  = useState('')
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState(null)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    const name = username.trim()
-    if (!name || !password) return
+    if (password !== confirm) {
+      setError('Passwords do not match')
+      return
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters')
+      return
+    }
 
     setLoading(true)
     setError(null)
 
     try {
-      const res = await apiFetch('/api/login', {
+      const res = await apiFetch('/api/register', {
         method: 'POST',
-        body: JSON.stringify({ username: name, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail || 'Login failed')
+        throw new Error(body.detail || 'Registration failed')
       }
       const data = await res.json()
       onLogin(data)
@@ -53,14 +60,14 @@ function Login({ onLogin, onRegister }) {
           </div>
           <h1 style={{ marginBottom: '0.3rem' }}>MenuLens</h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            Personalized menu recommendations
+            Create your account
           </p>
         </div>
 
         <div className="card" style={{ padding: '2rem' }}>
-          <h2 style={{ marginBottom: '0.3rem' }}>Sign in</h2>
+          <h2 style={{ marginBottom: '0.3rem' }}>Sign up</h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-            Welcome back to MenuLens
+            You'll set up your taste profile after creating an account.
           </p>
 
           <form onSubmit={handleSubmit}>
@@ -75,9 +82,17 @@ function Login({ onLogin, onRegister }) {
             />
             <input
               type="password"
-              placeholder="Password"
+              placeholder="Password (min 8 characters)"
               value={password}
               onChange={e => setPassword(e.target.value)}
+              disabled={loading}
+              style={{ marginBottom: '0.75rem' }}
+            />
+            <input
+              type="password"
+              placeholder="Confirm password"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
               disabled={loading}
               style={{ marginBottom: error ? '0.5rem' : '1rem' }}
             />
@@ -89,22 +104,22 @@ function Login({ onLogin, onRegister }) {
             <button
               type="submit"
               className="primary"
-              disabled={loading || !username.trim() || !password}
+              disabled={loading || !username.trim() || !password || !confirm}
               style={{ width: '100%' }}
             >
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Creating account…' : 'Create account'}
             </button>
           </form>
         </div>
 
         <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-          Don't have an account?{' '}
+          Already have an account?{' '}
           <button
             type="button"
-            onClick={onRegister}
+            onClick={onBack}
             style={{ background: 'none', border: 'none', color: 'var(--green)', cursor: 'pointer', fontSize: 'inherit', fontWeight: 600, padding: 0 }}
           >
-            Create one
+            Sign in
           </button>
         </p>
       </div>
@@ -112,4 +127,4 @@ function Login({ onLogin, onRegister }) {
   )
 }
 
-export default Login
+export default Register

@@ -11,9 +11,10 @@ from .database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    username   = Column(String(100), unique=True, nullable=True, index=True)
-    created_at = Column(DateTime, server_default=func.now())
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username      = Column(String(100), unique=True, nullable=True, index=True)
+    password_hash = Column(String(72), nullable=True)
+    created_at    = Column(DateTime, server_default=func.now())
 
     profile = relationship("TasteProfile", back_populates="user", uselist=False)
     visits  = relationship("RestaurantVisit", back_populates="user")

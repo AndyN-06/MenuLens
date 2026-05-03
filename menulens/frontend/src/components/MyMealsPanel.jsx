@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 // ── Image compression helper ───────────────────────────────────────────────────
 
@@ -263,9 +263,8 @@ function UnratedVisitCard({ visit, userId, onSave, onDiscard, onVisitSaved }) {
       const validRatings = ratedDishes.filter(d => d.rating !== '' && !isNaN(parseFloat(d.rating)))
 
       if (validRatings.length > 0) {
-        const res = await fetch(apiUrl(`/api/visits/${userId}/${saved.id}/dishes`), {
+        const res = await apiFetch(`/api/visits/${userId}/${saved.id}/dishes`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             restaurant_id: visit.restaurant_id || null,
             ratings: validRatings.map(d => ({
@@ -622,7 +621,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
   useEffect(() => {
     if (shouldLoad && userId) {
       setLoadingHistory(true)
-      fetch(apiUrl(`/api/visits/${userId}`))
+      apiFetch(`/api/visits/${userId}`)
         .then(r => r.json())
         .then(data => setHistory(Array.isArray(data) ? data : []))
         .catch(() => setHistory([]))
@@ -631,7 +630,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
   }, [shouldLoad, userId])
 
   const handleDeleteVisit = async (visitId) => {
-    await fetch(apiUrl(`/api/visits/${userId}/${visitId}`), { method: 'DELETE' })
+    await apiFetch(`/api/visits/${userId}/${visitId}`, { method: 'DELETE' })
     setHistory(prev => prev.filter(v => v.id !== visitId))
   }
 
@@ -647,12 +646,11 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
     try {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('user_id', userId)
-      const res  = await fetch(apiUrl('/api/import/excel'), { method: 'POST', body: formData })
+      const res  = await apiFetch('/api/import/excel', { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Import failed')
       setImportMsg(`Imported ${data.imported} visit${data.imported !== 1 ? 's' : ''}`)
-      const updated = await fetch(apiUrl(`/api/visits/${userId}`)).then(r => r.json())
+      const updated = await apiFetch(`/api/visits/${userId}`).then(r => r.json())
       setHistory(Array.isArray(updated) ? updated : [])
     } catch (err) {
       setImportMsg(`Error: ${err.message}`)

@@ -36,6 +36,11 @@ from .models import (
     Base, User, TasteProfile, RestaurantVisit,
     Restaurant, Menu, Dish, DishRating,
 )
+from .auth import (
+    hash_password, verify_password, create_jwt,
+    get_current_user, get_current_user_id,
+    set_auth_cookie,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -136,6 +141,11 @@ async def lifespan(app: FastAPI):
             "ALTER COLUMN rating TYPE FLOAT USING rating::float"
         ))
 
+        # ── users: add auth columns ───────────────────────────────────────────
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(72)"
+        ))
+
         conn.commit()
     yield
 
@@ -176,6 +186,12 @@ class TasteProfilePatch(BaseModel):
 
 class LoginRequest(BaseModel):
     username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
 
 
 class VisitCreate(BaseModel):
@@ -629,6 +645,42 @@ async def parse_endpoint(file: UploadFile = File(...)):
 
 # ── Users / Auth ──────────────────────────────────────────────────────────────
 
+def _has_profile(db: Session, user_id) -> bool:
+    return db.query(TasteProfile).filter(TasteProfile.user_id == user_id).first() is not None
+
+
+def _auth_response(user: User, db: Session) -> JSONResponse:
+    token    = create_jwt(str(user.id), user.username)
+    payload  = {"user_id": str(user.id), "username": user.username, "has_profile": _has_profile(db, user.id)}
+    response = JSONResponse(content=payload)
+    set_auth_cookie(response, token)
+    return response
+
+
+@app.post("/api/register", status_code=201)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    username = payload.username.strip()
+    password = payload.password
+
+    if not username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(status_code=409, detail="Username already taken")
+
+    user = User(
+        id=uuid.uuid4(),
+        username=username,
+        password_hash=hash_password(password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _auth_response(user, db)
+
+
 @app.post("/api/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     username = payload.username.strip()
@@ -637,25 +689,37 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.username == username).first()
     if not user:
-        user = User(id=uuid.uuid4(), username=username)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        raise HTTPException(status_code=404, detail="No account with that username")
 
-    has_profile = (
-        db.query(TasteProfile).filter(TasteProfile.user_id == user.id).first()
-        is not None
-    )
-    return {"user_id": str(user.id), "username": user.username, "has_profile": has_profile}
+    if user.password_hash is None:
+        raise HTTPException(
+            status_code=401,
+            detail="This account has no password. Please register a new account.",
+        )
+
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+
+    return _auth_response(user, db)
 
 
-@app.post("/api/users")
-def create_user(db: Session = Depends(get_db)):
-    user = User(id=uuid.uuid4())
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return {"user_id": str(user.id)}
+@app.post("/api/logout")
+def logout():
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie(key="ml_session", path="/")
+    return response
+
+
+@app.get("/api/me")
+def get_me(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    uid  = _parse_uuid(current_user["sub"])
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user_id": str(user.id), "username": user.username, "has_profile": _has_profile(db, user.id)}
 
 
 # ── Restaurants ───────────────────────────────────────────────────────────────
@@ -736,11 +800,11 @@ def get_restaurant_menu(restaurant_id: str, db: Session = Depends(get_db)):
 @app.post("/api/restaurants/{restaurant_id}/menu/verify")
 def verify_menu(
     restaurant_id: str,
-    user_id: str = Form(...),
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     rid  = _parse_uuid(restaurant_id)
-    uid  = _parse_uuid(user_id)
+    uid  = _parse_uuid(current_user_id)
     menu = db.query(Menu).filter(Menu.restaurant_id == rid).first()
     if not menu:
         raise HTTPException(status_code=404, detail="No menu found")
@@ -752,8 +816,18 @@ def verify_menu(
 
 # ── Profile ───────────────────────────────────────────────────────────────────
 
+def _require_owns(user_id: str, current_user_id: str):
+    if user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @app.get("/api/profile/{user_id}")
-def get_profile(user_id: str, db: Session = Depends(get_db)):
+def get_profile(
+    user_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    _require_owns(user_id, current_user_id)
     uid     = _parse_uuid(user_id)
     profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
     if not profile:
@@ -765,8 +839,10 @@ def get_profile(user_id: str, db: Session = Depends(get_db)):
 def create_or_replace_profile(
     user_id: str,
     payload: TasteProfileCreate,
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    _require_owns(user_id, current_user_id)
     uid  = _parse_uuid(user_id)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
@@ -800,8 +876,10 @@ def create_or_replace_profile(
 def patch_profile(
     user_id: str,
     payload: TasteProfilePatch,
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    _require_owns(user_id, current_user_id)
     uid     = _parse_uuid(user_id)
     profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
     if not profile:
@@ -832,7 +910,12 @@ def patch_profile(
 
 
 @app.post("/api/profile/{user_id}/recompute")
-def recompute_endpoint(user_id: str, db: Session = Depends(get_db)):
+def recompute_endpoint(
+    user_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    _require_owns(user_id, current_user_id)
     uid     = _parse_uuid(user_id)
     profile = recompute_profile(db, uid)
     return _profile_to_dict(profile)
@@ -841,7 +924,12 @@ def recompute_endpoint(user_id: str, db: Session = Depends(get_db)):
 # ── Restaurant Visits ─────────────────────────────────────────────────────────
 
 @app.get("/api/visits/{user_id}")
-def get_visits(user_id: str, db: Session = Depends(get_db)):
+def get_visits(
+    user_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    _require_owns(user_id, current_user_id)
     uid    = _parse_uuid(user_id)
     visits = (
         db.query(RestaurantVisit)
@@ -856,8 +944,10 @@ def get_visits(user_id: str, db: Session = Depends(get_db)):
 def create_visit(
     user_id: str,
     payload: VisitCreate,
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    _require_owns(user_id, current_user_id)
     uid  = _parse_uuid(user_id)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
@@ -897,8 +987,10 @@ def rate_dishes(
     user_id: str,
     visit_id: str,
     payload: DishRatingsPayload,
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    _require_owns(user_id, current_user_id)
     uid = _parse_uuid(user_id)
     vid = _parse_uuid(visit_id)
 
@@ -998,8 +1090,10 @@ def rate_dishes(
 def get_visit_dishes(
     user_id: str,
     visit_id: str,
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    _require_owns(user_id, current_user_id)
     uid = _parse_uuid(user_id)
     vid = _parse_uuid(visit_id)
 
@@ -1032,7 +1126,13 @@ def get_visit_dishes(
 
 
 @app.delete("/api/visits/{user_id}/{visit_id}", status_code=204)
-def delete_visit(user_id: str, visit_id: str, db: Session = Depends(get_db)):
+def delete_visit(
+    user_id: str,
+    visit_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    _require_owns(user_id, current_user_id)
     uid   = _parse_uuid(user_id)
     vid   = _parse_uuid(visit_id)
     visit = (
@@ -1346,10 +1446,10 @@ async def recommend_stream(
 @app.post("/api/import/excel")
 async def import_excel(
     file: UploadFile = File(...),
-    user_id: str = Form(...),
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    uid  = _parse_uuid(user_id)
+    uid  = _parse_uuid(current_user_id)
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

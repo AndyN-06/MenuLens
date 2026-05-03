@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { apiUrl } from './api'
+import { apiUrl, apiFetch } from './api'
 import Uploader from './components/Uploader'
 import DishCards from './components/DishCards'
 import Onboarding from './components/Onboarding'
 import Login from './components/Login'
+import Register from './components/Register'
 import MyMealsPanel from './components/MyMealsPanel'
 import RestaurantSearch from './components/RestaurantSearch'
 import NewRestaurantForm from './components/NewRestaurantForm'
@@ -298,8 +299,8 @@ function ProfileTab({ username, userId, onLogout }) {
   useEffect(() => {
     if (!userId) { setLoading(false); return }
     Promise.all([
-      fetch(apiUrl(`/api/profile/${userId}`)).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(apiUrl(`/api/visits/${userId}`)).then(r => r.ok ? r.json() : []).catch(() => []),
+      apiFetch(`/api/profile/${userId}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      apiFetch(`/api/visits/${userId}`).then(r => r.ok ? r.json() : []).catch(() => []),
     ]).then(([profileData, visitsData]) => {
       setProfile(profileData)
       setVisits(Array.isArray(visitsData) ? visitsData : [])
@@ -637,22 +638,27 @@ function App() {
   const [pendingVisits, setPendingVisits] = useState([])
 
   useEffect(() => {
-    const storedId   = localStorage.getItem('menulens_user_id')
-    const storedName = localStorage.getItem('menulens_username')
-    if (storedId && storedName) {
-      setUserId(storedId)
-      setUsername(storedName)
-      setStage('idle')
-    } else {
-      setStage('login')
-    }
-    if (storedId) setPendingVisits(loadPendingVisits(storedId))
+    // Restore session from HTTP-only cookie
+    apiFetch('/api/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.user_id) {
+          setUserId(data.user_id)
+          setUsername(data.username)
+          setPendingVisits(loadPendingVisits(data.user_id))
+          setStage(data.has_profile ? 'idle' : 'onboarding')
+        } else {
+          setStage('login')
+        }
+      })
+      .catch(() => setStage('login'))
   }, [])
 
   // ── Auth handlers ────────────────────────────────────────────────────────────
   const handleLogin = ({ user_id, username: name, has_profile }) => {
-    localStorage.setItem('menulens_user_id', user_id)
-    localStorage.setItem('menulens_username', name)
+    // Clean up any legacy localStorage auth keys
+    localStorage.removeItem('menulens_user_id')
+    localStorage.removeItem('menulens_username')
     setUserId(user_id)
     setUsername(name)
     setPendingVisits(loadPendingVisits(user_id))
@@ -661,7 +667,8 @@ function App() {
 
   const handleOnboardingComplete = () => setStage('idle')
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await apiFetch('/api/logout', { method: 'POST' }) } catch { /* ignore */ }
     localStorage.removeItem('menulens_user_id')
     localStorage.removeItem('menulens_username')
     setUserId(null)
@@ -698,9 +705,8 @@ function App() {
   const handleCreateRestaurant = async ({ name, cuisine_type, city }, intent = 'scan') => {
     setCreatingRestaurant(true)
     try {
-      const res = await fetch(apiUrl('/api/restaurants'), {
+      const res = await apiFetch('/api/restaurants', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, cuisine_type, city }),
       })
       if (!res.ok) throw new Error('Failed to create restaurant')
@@ -719,13 +725,12 @@ function App() {
   const handleUseExistingMenu = async () => {
     setStage('ranking')
     try {
-      const menuRes = await fetch(apiUrl(`/api/restaurants/${selectedRestaurant.id}/menu`))
+      const menuRes = await apiFetch(`/api/restaurants/${selectedRestaurant.id}/menu`)
       if (!menuRes.ok) throw new Error('Could not load saved menu')
       const menuData = await menuRes.json()
 
-      const rankRes = await fetch(apiUrl('/api/recommend/rank'), {
+      const rankRes = await apiFetch('/api/recommend/rank', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           dishes:          menuData.dishes,
           restaurant_name: selectedRestaurant.name,
@@ -771,6 +776,7 @@ function App() {
 
       const response = await fetch(apiUrl('/api/recommend/stream'), {
         method: 'POST',
+        credentials: 'include',
         body: formData,
       })
 
@@ -812,9 +818,8 @@ function App() {
       const restaurantName = selectedRestaurant?.name    || parsedData.restaurant_name || ''
       const cuisineType    = selectedRestaurant?.cuisine_type || parsedData.cuisine_type    || ''
 
-      const rankRes = await fetch(apiUrl('/api/recommend/rank'), {
+      const rankRes = await apiFetch('/api/recommend/rank', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           dishes:          parsedData.dishes,
           restaurant_name: restaurantName,
@@ -847,9 +852,8 @@ function App() {
   // ── Visit handlers (My List tab) ──────────────────────────────────────────────
   const handleSaveVisit = async (visitData) => {
     try {
-      const res = await fetch(apiUrl(`/api/visits/${userId}`), {
+      const res = await apiFetch(`/api/visits/${userId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(visitData),
       })
       const saved = await res.json()
@@ -870,7 +874,8 @@ function App() {
 
   // ── Global stage gates ────────────────────────────────────────────────────────
   if (stage === 'loading') return null
-  if (stage === 'login')   return <PhoneFrame><Login onLogin={handleLogin} /></PhoneFrame>
+  if (stage === 'login')    return <PhoneFrame><Login onLogin={handleLogin} onRegister={() => setStage('register')} /></PhoneFrame>
+  if (stage === 'register') return <PhoneFrame><Register onLogin={handleLogin} onBack={() => setStage('login')} /></PhoneFrame>
   if (stage === 'onboarding') {
     return <PhoneFrame><Onboarding userId={userId} onComplete={handleOnboardingComplete} /></PhoneFrame>
   }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { apiUrl } from '../api'
+import { apiUrl, apiFetch } from '../api'
 
 // ── Image compression helper ───────────────────────────────────────────────────
 
@@ -218,9 +218,8 @@ function LogMealForm({ restaurant, userId, onSaved, onBack }) {
     setSaving(true)
     setError(null)
     try {
-      const visitRes = await fetch(apiUrl(`/api/visits/${userId}`), {
+      const visitRes = await apiFetch(`/api/visits/${userId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           restaurant_id:     restaurant.id   || null,
           restaurant_name:   restaurant.name,
@@ -234,9 +233,8 @@ function LogMealForm({ restaurant, userId, onSaved, onBack }) {
 
       const validRatings = ratedDishes.filter(d => d.rating !== '' && !isNaN(parseFloat(d.rating)))
       if (validRatings.length > 0) {
-        const dishRes = await fetch(apiUrl(`/api/visits/${userId}/${visit.id}/dishes`), {
+        const dishRes = await apiFetch(`/api/visits/${userId}/${visit.id}/dishes`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             restaurant_id: restaurant.id || null,
             ratings: validRatings.map(d => ({
