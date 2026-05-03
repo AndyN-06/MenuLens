@@ -1,19 +1,37 @@
-// src/components/PhoneFrame.jsx
+import { useState, useEffect } from 'react'
+
+const PHONE_W = 393
+const PHONE_H = 852
+const PAD = 32
+
 function PhoneFrame({ children }) {
+  const [scale, setScale] = useState(1)
+
+  useEffect(() => {
+    function computeScale() {
+      const scaleX = (window.innerWidth  - PAD) / PHONE_W
+      const scaleY = (window.innerHeight - PAD) / PHONE_H
+      setScale(Math.min(1, scaleX, scaleY))
+    }
+    computeScale()
+    window.addEventListener('resize', computeScale)
+    return () => window.removeEventListener('resize', computeScale)
+  }, [])
+
   return (
     <div style={{
-      minHeight: '100vh',
-      backgroundColor: '#1a1a2e', // dark desktop background
+      height: '100vh',
+      overflow: 'hidden',
+      backgroundColor: '#1a1a2e',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '2rem',
     }}>
       {/* Phone shell */}
       <div style={{
         position: 'relative',
-        width: '393px',
-        height: '852px', // iPhone 14 Pro dimensions
+        width: `${PHONE_W}px`,
+        height: `${PHONE_H}px`,
         backgroundColor: '#1c1c1e',
         borderRadius: '54px',
         boxShadow: `
@@ -23,6 +41,9 @@ function PhoneFrame({ children }) {
           0 40px 80px rgba(0,0,0,0.6)
         `,
         padding: '12px',
+        transform: `scale(${scale})`,
+        transformOrigin: 'center center',
+        flexShrink: 0,
       }}>
         {/* Side buttons */}
         <div style={{ position: 'absolute', left: '-3px', top: '160px', width: '3px', height: '36px', backgroundColor: '#3a3a3c', borderRadius: '2px 0 0 2px' }} /> {/* mute */}
@@ -39,8 +60,6 @@ function PhoneFrame({ children }) {
           overflow: 'hidden',
           position: 'relative',
         }}>
-          
-
           {/* App content — flex column so nav stays pinned at bottom */}
           <div style={{
             width: '100%',

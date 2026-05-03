@@ -146,7 +146,8 @@ function Onboarding({ userId, onComplete }) {
 
   return (
     <div style={{
-      minHeight: '100vh',
+      height: '100%',
+      overflowY: 'auto',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',

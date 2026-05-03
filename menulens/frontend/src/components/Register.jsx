@@ -41,7 +41,7 @@ function Register({ onLogin, onBack }) {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column',
       justifyContent: 'center', alignItems: 'center',
       backgroundColor: 'var(--bg)', padding: '1.5rem',
     }}>
