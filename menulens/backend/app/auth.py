@@ -60,11 +60,12 @@ def get_current_user_id(ml_session: str | None = Cookie(default=None)) -> str:
 
 def set_auth_cookie(response: JSONResponse, token: str) -> None:
     is_production = os.environ.get("ENVIRONMENT", "").lower() == "production"
+    # SameSite=None is required for cross-origin cookies (Vercel frontend → Railway backend)
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        samesite="lax",
+        samesite="none" if is_production else "lax",
         secure=is_production,
         max_age=JWT_EXPIRY_HOURS * 3600,
         path="/",
