@@ -38,10 +38,20 @@ MenuLens/
         ├── vercel.json       # Vercel SPA rewrite rules
         └── src/
             ├── main.jsx
-            ├── App.jsx           # App shell, state machine, all tabs
-            ├── index.css         # Design system (Beli-inspired light theme)
+            ├── App.jsx           # Auth gate + router, shared app state
+            ├── AppContext.jsx    # useApp() — user, pending visits, logout
+            ├── index.css         # Design system (light green/cream theme)
+            ├── pages/
+            │   ├── HomePage.jsx      # Restaurant search + scan/rank flow
+            │   ├── DiscoverPage.jsx  # Browse restaurants and trending dishes
+            │   ├── ListPage.jsx      # Visit history and pending ratings
+            │   ├── FriendsPage.jsx   # Social feed (preview, not wired up)
+            │   ├── StatsPage.jsx     # Charts derived from visit history
+            │   ├── ProfilePage.jsx   # Collections, taste profile, activity
+            │   └── SettingsPage.jsx  # Preferences, notifications, data
             └── components/
-                ├── PhoneFrame.jsx       # iPhone-style wrapper
+                ├── AppLayout.jsx        # Top nav, avatar menu, footer
+                ├── icons.jsx            # Shared line icons
                 ├── Uploader.jsx         # Drag/drop menu uploader
                 ├── DishCards.jsx        # Ranked dish results
                 ├── Onboarding.jsx       # Taste profile setup flow
@@ -50,6 +60,21 @@ MenuLens/
                 ├── LogMealForm.jsx      # Manual meal logging + dish ratings
                 └── MyMealsPanel.jsx     # Visit history and pending visits
 ```
+
+### Routes
+
+| Path | Page |
+|------|------|
+| `/` | Home — restaurant search, menu scan, ranked picks |
+| `/discover` | Browse restaurants and trending dishes |
+| `/list` | Visit history and visits awaiting ratings |
+| `/friends` | Friend activity feed (preview) |
+| `/stats` | Charts derived from your visit history |
+| `/profile` | Collections, taste profile, recent activity |
+| `/settings` | Taste preferences, notifications, data |
+
+Profile and Settings are reached from the avatar menu in the header; the other five
+are in the main nav. `vercel.json` already rewrites all routes to `index.html`.
 
 ## Deployment
 

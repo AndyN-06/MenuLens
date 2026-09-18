@@ -40,12 +40,8 @@ function Register({ onLogin, onBack }) {
   }
 
   return (
-    <div style={{
-      height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column',
-      justifyContent: 'center', alignItems: 'center',
-      backgroundColor: 'var(--bg)', padding: '1.5rem',
-    }}>
-      <div style={{ width: '100%', maxWidth: '400px' }}>
+    <div className="centered-screen">
+      <div style={{ width: '100%', maxWidth: '420px' }}>
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <div style={{
             width: '56px', height: '56px', borderRadius: '16px',
@@ -64,7 +60,7 @@ function Register({ onLogin, onBack }) {
           </p>
         </div>
 
-        <div className="card" style={{ padding: '2rem' }}>
+        <div className="card card-pad">
           <h2 style={{ marginBottom: '0.3rem' }}>Sign up</h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
             You'll set up your taste profile after creating an account.

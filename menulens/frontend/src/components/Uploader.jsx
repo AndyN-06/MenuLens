@@ -45,7 +45,7 @@ function Uploader({ onFileSelect, stage, onReset }) {
           border: `2px dashed ${dragActive ? 'var(--green)' : isProcessing ? 'var(--border-hover)' : 'var(--border)'}`,
           borderRadius: 'var(--radius-lg)',
           backgroundColor: dragActive ? 'var(--green-tint)' : 'var(--surface)',
-          padding: '2.5rem 1.5rem',
+          padding: '3.5rem 2rem',
           textAlign: 'center',
           cursor: isClickable ? 'pointer' : 'default',
           transition: 'all 0.18s ease',
@@ -65,7 +65,7 @@ function Uploader({ onFileSelect, stage, onReset }) {
           {isProcessing ? (
             <div className="spinner" style={{ width: '2rem', height: '2rem' }} />
           ) : (
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none"
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none"
               stroke="var(--text-dim)" strokeWidth="1.75"
               strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="3" ry="3" />
@@ -80,7 +80,7 @@ function Uploader({ onFileSelect, stage, onReset }) {
           {isProcessing ? 'Analyzing menu…' : 'Upload menu photo or PDF'}
         </div>
         <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-          {isProcessing ? 'AI parsing in progress' : 'Tap to browse or drag & drop · JPEG, PNG, PDF'}
+          {isProcessing ? 'AI parsing in progress' : 'Click to browse or drag & drop · JPEG, PNG, PDF'}
         </div>
       </div>
 

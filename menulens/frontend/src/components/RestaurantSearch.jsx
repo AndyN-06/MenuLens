@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { apiUrl } from '../api'
 
-function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
+function RestaurantSearch({ onSelect, onCreateNew, disabled, size }) {
   const [query, setQuery]     = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [open, setOpen]       = useState(false)
   const debounceRef  = useRef(null)
   const containerRef = useRef(null)
+  // Set when the query change came from picking a result, so the effect below
+  // doesn't re-run the search and pop the dropdown back open over the result.
+  const skipSearchRef = useRef(false)
 
   // Close on outside click
   useEffect(() => {
@@ -21,6 +24,10 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
   }, [])
 
   useEffect(() => {
+    if (skipSearchRef.current) {
+      skipSearchRef.current = false
+      return
+    }
     if (query.length < 2) {
       setResults([])
       setOpen(false)
@@ -47,6 +54,8 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
   }, [query])
 
   const handleSelect = (r) => {
+    skipSearchRef.current = true
+    clearTimeout(debounceRef.current)
     setQuery(r.name)
     setOpen(false)
     onSelect(r)
@@ -71,6 +80,7 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
           placeholder="Search for a restaurant…"
           disabled={disabled}
           autoComplete="off"
+          className={size === 'lg' ? 'input-lg' : undefined}
           style={{
             width: '100%',
             paddingRight: loading ? '2.5rem' : undefined,
@@ -98,7 +108,7 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
           boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
           zIndex: 200,
           overflow: 'hidden',
-          maxHeight: '320px',
+          maxHeight: '380px',
           overflowY: 'auto',
         }}>
           {results.map((r, i) => (
@@ -111,7 +121,7 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
                 flexDirection: 'column',
                 alignItems: 'flex-start',
                 gap: '0.15rem',
-                padding: '0.7rem 0.875rem',
+                padding: '0.8rem 1rem',
                 border: 'none',
                 borderBottom: i < results.length - 1 || showAddNew ? '1px solid var(--border)' : 'none',
                 background: 'transparent',
@@ -156,7 +166,7 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled }) {
               style={{
                 width: '100%',
                 display: 'flex', alignItems: 'center', gap: '0.5rem',
-                padding: '0.7rem 0.875rem',
+                padding: '0.8rem 1rem',
                 border: 'none',
                 background: 'transparent',
                 cursor: 'pointer',

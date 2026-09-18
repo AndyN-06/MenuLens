@@ -506,7 +506,7 @@ function HistoryCard({ visit, onDelete }) {
       : []
 
   return (
-    <div style={{ padding: '0.875rem 0', borderBottom: '1px solid var(--border)' }}>
+    <div className="history-row" style={{ padding: '1rem 0', borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
         {/* Left: restaurant info */}
         <button
@@ -519,9 +519,12 @@ function HistoryCard({ visit, onDelete }) {
           }}
         >
           <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{visit.restaurant_name}</div>
-          {visit.cuisine_type && (
+          {(visit.cuisine_type || visit.visited_at) && (
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-              {visit.cuisine_type}
+              {[
+                visit.cuisine_type,
+                visit.visited_at && new Date(visit.visited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+              ].filter(Boolean).join(' · ')}
             </div>
           )}
           {dishRatings.length > 0 && (
@@ -610,16 +613,14 @@ function HistoryCard({ visit, onDelete }) {
 
 // ── Panel shell ────────────────────────────────────────────────────────────────
 
-function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVisit, onRemovePending }) {
+function MyMealsPanel({ userId, pendingVisits, onSaveVisit, onRemovePending }) {
   const [history,        setHistory]        = useState([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [importLoading,  setImportLoading]  = useState(false)
   const [importMsg,      setImportMsg]      = useState(null)
 
-  const shouldLoad = inline ? true : isOpen
-
   useEffect(() => {
-    if (shouldLoad && userId) {
+    if (userId) {
       setLoadingHistory(true)
       apiFetch(`/api/visits/${userId}`)
         .then(r => r.json())
@@ -627,7 +628,7 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
         .catch(() => setHistory([]))
         .finally(() => setLoadingHistory(false))
     }
-  }, [shouldLoad, userId])
+  }, [userId])
 
   const handleDeleteVisit = async (visitId) => {
     await apiFetch(`/api/visits/${userId}/${visitId}`, { method: 'DELETE' })
@@ -669,31 +670,10 @@ function MyMealsPanel({ inline, isOpen, onClose, userId, pendingVisits, onSaveVi
     onVisitSaved: handleVisitSaved,
   }
 
-  if (inline) {
-    return (
-      <div className="screen fade-in">
-        <div style={{ paddingTop: '1rem', marginBottom: '1.5rem' }}>
-          <h1 style={{ marginBottom: '0.25rem' }}>My List</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Your restaurant visits & ratings</p>
-        </div>
-        <PanelContent {...sharedProps} />
-      </div>
-    )
-  }
-
   return (
-    <>
-      {isOpen && (
-        <div onClick={onClose} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)', zIndex: 100 }} />
-      )}
-      <div className={`my-meals-panel${isOpen ? ' open' : ''}`}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ marginBottom: 0 }}>My List</h2>
-          <button onClick={onClose} className="ghost" style={{ padding: '0.3rem 0.5rem', fontSize: '1rem' }}>✕</button>
-        </div>
-        <PanelContent {...sharedProps} />
-      </div>
-    </>
+    <div className="fade-in">
+      <PanelContent {...sharedProps} />
+    </div>
   )
 }
 
@@ -718,7 +698,9 @@ function PanelContent({ pendingVisits, history, loadingHistory, importLoading, i
 
       <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <div className="section-label" style={{ marginBottom: 0 }}>Meal history</div>
+          <div className="section-label" style={{ marginBottom: 0 }}>
+            Meal history{history.length > 0 ? ` · ${history.length}` : ''}
+          </div>
           <label style={{
             fontSize: '0.8rem', fontWeight: 600,
             color: importLoading ? 'var(--text-dim)' : 'var(--green)',
@@ -745,7 +727,9 @@ function PanelContent({ pendingVisits, history, loadingHistory, importLoading, i
             No saved meals yet. Rate a visit above or import from Excel.
           </p>
         ) : (
-          history.map(v => <HistoryCard key={v.id} visit={v} onDelete={onDeleteVisit} />)
+          <div className="card card-pad" style={{ paddingTop: 0, paddingBottom: 0 }}>
+            {history.map(v => <HistoryCard key={v.id} visit={v} onDelete={onDeleteVisit} />)}
+          </div>
         )}
       </section>
     </>

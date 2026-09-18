@@ -41,7 +41,7 @@ function Step1({ selected, onToggle }) {
       <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
         Select all that apply — this seeds your taste profile.
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.625rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '0.625rem' }}>
         {CUISINES.map(({ name, flag }) => {
           const active = selected.has(name)
           return (
@@ -145,24 +145,15 @@ function Onboarding({ userId, onComplete }) {
   }
 
   return (
-    <div style={{
-      height: '100%',
-      overflowY: 'auto',
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: 'var(--bg)',
-      padding: '1.5rem',
-    }}>
-      <div style={{ width: '100%', maxWidth: '440px' }}>
+    <div className="centered-screen">
+      <div style={{ width: '100%', maxWidth: '560px' }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <h1 style={{ marginBottom: '0.2rem' }}>MenuLens</h1>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Build your taste profile</p>
         </div>
 
-        <div className="card" style={{ padding: '1.75rem' }}>
+        <div className="card card-pad">
           <ProgressBar step={step} total={2} />
 
           <div key={stepKey} className="step-in">

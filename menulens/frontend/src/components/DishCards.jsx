@@ -41,9 +41,9 @@ function DishCard({ dish, ranked }) {
     <div style={{
       backgroundColor: 'var(--surface)',
       borderRadius: 'var(--radius)',
-      padding: '1rem',
-      marginBottom: '0.625rem',
+      padding: '1.125rem',
       boxShadow: 'var(--shadow-sm)',
+      height: '100%',
       borderLeft: isGreat ? '3px solid var(--green)' : '3px solid transparent',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
@@ -79,7 +79,7 @@ function DishCard({ dish, ranked }) {
 function SectionGroup({ title, dishes, ranked, accentColor }) {
   if (!dishes.length) return null
   return (
-    <div style={{ marginBottom: '1.75rem' }}>
+    <div style={{ marginBottom: '2.25rem' }}>
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -106,9 +106,11 @@ function SectionGroup({ title, dishes, ranked, accentColor }) {
           {dishes.length}
         </span>
       </div>
-      {dishes.map((dish, i) => (
-        <DishCard key={dish.dish_name ? `${dish.dish_name}-${i}` : i} dish={dish} ranked={ranked} />
-      ))}
+      <div className="grid grid-2" style={{ gap: 12 }}>
+        {dishes.map((dish, i) => (
+          <DishCard key={dish.dish_name ? `${dish.dish_name}-${i}` : i} dish={dish} ranked={ranked} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -129,7 +131,7 @@ function DishCards({ data }) {
   const header = (
     <div style={{ marginBottom: '1.25rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-        <h2 style={{ marginBottom: 0 }}>{ranked ? 'Your picks' : 'Menu items'}</h2>
+        <h2 style={{ marginBottom: 0, fontSize: '1.375rem' }}>{ranked ? 'Your picks' : 'Menu items'}</h2>
         <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 500 }}>
           {dish_count} dishes
         </span>
