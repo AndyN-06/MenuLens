@@ -13,7 +13,7 @@ import time
 import threading
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -40,6 +40,10 @@ from .auth import (
     hash_password, verify_password, create_jwt,
     get_current_user, get_current_user_id,
     set_auth_cookie,
+)
+from .guest import (
+    GUEST_PREFIX, GUEST_SCAN_LIMIT,
+    create_guest_user, purge_stale_guests, is_guest_username,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -76,14 +80,29 @@ def _is_pdf(content_type: str) -> bool:
     return content_type == "application/pdf"
 
 
-async def _parse_upload(file: UploadFile) -> tuple[bytes, dict]:
-    """Read the upload and dispatch to the correct parser. Returns (raw_bytes, parsed)."""
-    ct = file.content_type or ""
-    if not (_is_image(ct) or _is_pdf(ct)):
-        raise HTTPException(status_code=400, detail="File must be an image or PDF")
-    data = await file.read()
-    parsed = parse_menu_pdf(data) if _is_pdf(ct) else parse_menu_image(data)
-    return data, parsed
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 10 * 1024 * 1024))  # 10 MB
+
+
+async def _read_capped(file: UploadFile) -> bytes:
+    """Read an upload, refusing anything over MAX_UPLOAD_BYTES.
+
+    Read in chunks rather than calling .read() bare: a single read would pull the
+    whole body into memory before we could reject it.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File is too large (limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @asynccontextmanager
@@ -155,10 +174,12 @@ app = FastAPI(title="MenuLens API", version="4.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://menulens-mu.vercel.app",
-        os.environ.get("FRONTEND_URL", ""),   # set this in Railway
+        o for o in [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "https://menulens-mu.vercel.app",
+            os.environ.get("FRONTEND_URL", ""),   # set this in Railway
+        ] if o
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -603,44 +624,62 @@ async def health_check():
 
 
 @app.get("/health/llm")
-async def health_llm():
+async def health_llm(request: Request):
+    # Every call here is a real (small) Anthropic request, so it is rate limited.
+    # Railway's healthcheck uses /health, which stays unthrottled.
+    _rate_limit(request, "health_llm", limit=6, window_seconds=300)
+
     result = health_check_anthropic()
     if result["status"] == "error":
-        raise HTTPException(status_code=503, detail=result)
+        # The upstream detail can carry configuration specifics — log it, return
+        # a flat failure to the caller.
+        logger.error("[health] LLM check failed: %s", result.get("detail"))
+        raise HTTPException(status_code=503, detail={"status": "error", "service": "llm"})
     return result
 
 
-# ── OCR/Parse — debug endpoints ───────────────────────────────────────────────
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+# In-process fixed-window limiter. Enough to blunt credential stuffing and guest
+# spam on a single-process deployment; it does NOT hold across replicas, so move
+# this to Redis before scaling the backend horizontally.
 
-@app.post("/api/ocr")
-async def ocr_endpoint(file: UploadFile = File(...)):
-    try:
-        data, parsed = await _parse_upload(file)
-        logger.info(f"[OCR] processing {file.filename} ({len(data):,} bytes)")
-        lines = [d.get("dish_name", "") for d in parsed.get("dishes", [])]
-        text  = "\n".join(lines)
-        return {"filename": file.filename, "text": text, "char_count": len(text)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+_rate_buckets: dict[str, list[float]] = {}
+_rate_lock = threading.Lock()
+_RATE_MAX_WINDOW = 3600   # longest window passed to _rate_limit below
 
 
-@app.post("/api/parse")
-async def parse_endpoint(file: UploadFile = File(...)):
-    try:
-        _, parsed = await _parse_upload(file)
-        return {
-            "filename": file.filename,
-            "dish_count": len(parsed.get("dishes", [])),
-            **parsed,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+def _client_ip(request: Request) -> str:
+    # Railway terminates TLS upstream, so the real client is in X-Forwarded-For.
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit(request: Request, bucket: str, limit: int, window_seconds: int) -> None:
+    """Raise 429 once `limit` requests from this IP land inside `window_seconds`."""
+    key = f"{bucket}:{_client_ip(request)}"
+    now = time.monotonic()
+    cutoff = now - window_seconds
+    with _rate_lock:
+        hits = [t for t in _rate_buckets.get(key, []) if t > cutoff]
+        if len(hits) >= limit:
+            retry_after = int(window_seconds - (now - hits[0])) + 1
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Please wait a moment and try again.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        hits.append(now)
+        _rate_buckets[key] = hits
+
+        # Opportunistic sweep so the dict cannot grow without bound. Sweep against
+        # the longest window in use, not this bucket's — otherwise a short-window
+        # call could evict a long-window bucket early and reset someone's limit.
+        if len(_rate_buckets) > 10_000:
+            stale_before = now - _RATE_MAX_WINDOW
+            for k in [k for k, v in _rate_buckets.items() if all(t <= stale_before for t in v)]:
+                del _rate_buckets[k]
 
 
 # ── Users / Auth ──────────────────────────────────────────────────────────────
@@ -649,23 +688,48 @@ def _has_profile(db: Session, user_id) -> bool:
     return db.query(TasteProfile).filter(TasteProfile.user_id == user_id).first() is not None
 
 
+# Guest scan counter.  Menus are the durable record of a scan, but a scan with
+# no restaurant_id persists nothing while still costing an Anthropic call, so an
+# in-process tally covers that gap.  Whichever is higher wins.
+_guest_scan_tally: dict[str, int] = {}
+
+
+def _guest_scans_used(db: Session, user_id) -> int:
+    persisted = db.query(Menu).filter(Menu.scanned_by == user_id).count()
+    return max(persisted, _guest_scan_tally.get(str(user_id), 0))
+
+
 def _auth_response(user: User, db: Session) -> JSONResponse:
     token    = create_jwt(str(user.id), user.username)
-    payload  = {"user_id": str(user.id), "username": user.username, "has_profile": _has_profile(db, user.id)}
+    payload  = {
+        "user_id": str(user.id),
+        "username": user.username,
+        "has_profile": _has_profile(db, user.id),
+        "is_guest": is_guest_username(user.username),
+    }
     response = JSONResponse(content=payload)
     set_auth_cookie(response, token)
     return response
 
 
 @app.post("/api/register", status_code=201)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
+    _rate_limit(request, "register", limit=5, window_seconds=3600)
+
     username = payload.username.strip()
     password = payload.password
 
     if not username:
         raise HTTPException(status_code=400, detail="Username cannot be empty")
+    if len(username) > 100:
+        raise HTTPException(status_code=400, detail="Username must be 100 characters or fewer")
+    if username.lower().startswith(GUEST_PREFIX):
+        raise HTTPException(status_code=400, detail=f"Usernames starting with '{GUEST_PREFIX}' are reserved")
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    # bcrypt hashes at most 72 bytes and raises past that, which would surface as a 500.
+    if len(password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=400, detail="Password must be 72 bytes or fewer")
 
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(status_code=409, detail="Username already taken")
@@ -682,24 +746,45 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/api/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
+    _rate_limit(request, "login", limit=10, window_seconds=900)
+
     username = payload.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username cannot be empty")
 
     user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="No account with that username")
 
-    if user.password_hash is None:
-        raise HTTPException(
-            status_code=401,
-            detail="This account has no password. Please register a new account.",
-        )
+    # One message and one status for every failure mode. Distinguishing "no such
+    # user" from "wrong password" lets anyone enumerate registered usernames.
+    # Guest accounts have no password_hash and can never be logged into.
+    invalid = HTTPException(status_code=401, detail="Incorrect username or password")
 
+    if not user or user.password_hash is None:
+        raise invalid
     if not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect password")
+        raise invalid
 
+    return _auth_response(user, db)
+
+
+@app.post("/api/guest", status_code=201)
+def create_guest(request: Request, db: Session = Depends(get_db)):
+    """Create a throwaway seeded account so someone can explore without signing up."""
+    # Each guest writes a batch of seed rows, so cap how fast they can be made.
+    _rate_limit(request, "guest", limit=5, window_seconds=3600)
+
+    # Opportunistic cleanup — cheap, and avoids needing a scheduler.
+    try:
+        purge_stale_guests(db)
+    except Exception:
+        logger.warning("[guest] purge failed, continuing", exc_info=True)
+        db.rollback()
+
+    user = create_guest_user(db)
+    db.commit()
+    db.refresh(user)
+    logger.info("[guest] created %s", user.username)
     return _auth_response(user, db)
 
 
@@ -719,7 +804,17 @@ def get_me(
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"user_id": str(user.id), "username": user.username, "has_profile": _has_profile(db, user.id)}
+    guest = is_guest_username(user.username)
+    payload = {
+        "user_id": str(user.id),
+        "username": user.username,
+        "has_profile": _has_profile(db, user.id),
+        "is_guest": guest,
+    }
+    if guest:
+        payload["scans_used"] = _guest_scans_used(db, user.id)
+        payload["scan_limit"] = GUEST_SCAN_LIMIT
+    return payload
 
 
 # ── Restaurants ───────────────────────────────────────────────────────────────
@@ -759,10 +854,17 @@ def search_restaurants(q: str, limit: int = 10, db: Session = Depends(get_db)):
 
 
 @app.post("/api/restaurants", status_code=201)
-def create_restaurant(payload: RestaurantCreate, db: Session = Depends(get_db)):
+def create_restaurant(
+    payload: RestaurantCreate,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Restaurant name cannot be empty")
     restaurant = Restaurant(
         id=uuid.uuid4(),
-        name=payload.name.strip(),
+        name=name,
         cuisine_type=payload.cuisine_type,
         city=payload.city,
     )
@@ -1196,14 +1298,20 @@ def _get_community_favorites(
 
 
 @app.post("/api/recommend/rank")
-def rank_endpoint(payload: RankRequest, db: Session = Depends(get_db)):
-    """Apply formula-based scoring to a pre-parsed dish list."""
-    uid: uuid.UUID | None = None
-    if payload.user_id:
-        try:
-            uid = uuid.UUID(payload.user_id)
-        except ValueError:
-            pass
+def rank_endpoint(
+    payload: RankRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Apply formula-based scoring to a pre-parsed dish list.
+
+    The profile scored against is always the caller's own. `payload.user_id` is
+    client-supplied, so honouring it would let anyone rank against — and infer —
+    another user's taste profile.
+    """
+    if payload.user_id and payload.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    uid: uuid.UUID | None = _parse_uuid(current_user_id)
 
     community_favorites = _get_community_favorites(
         db, payload.restaurant_name, exclude_user_id=uid
@@ -1256,51 +1364,6 @@ def rank_endpoint(payload: RankRequest, db: Session = Depends(get_db)):
 
 # ── Recommend — non-streaming (legacy) ───────────────────────────────────────
 
-@app.post("/api/recommend")
-async def recommend_endpoint(
-    file: UploadFile = File(...),
-    user_id: Optional[str] = Form(None),
-    db: Session = Depends(get_db),
-):
-    try:
-        _, parsed = await _parse_upload(file)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-    dishes          = parsed.get("dishes", [])
-    restaurant_name = parsed.get("restaurant_name", "")
-    cuisine_type    = parsed.get("cuisine_type", "")
-
-    if user_id:
-        try:
-            uid     = uuid.UUID(user_id)
-            profile = db.query(TasteProfile).filter(TasteProfile.user_id == uid).first()
-            if profile:
-                scored = score_dishes(dishes, _profile_to_dict(profile), cuisine_type)
-                return {
-                    "filename": file.filename,
-                    "dish_count": len(scored),
-                    "ranked": True,
-                    "restaurant_name": restaurant_name,
-                    "cuisine_type": cuisine_type,
-                    "dishes": scored,
-                }
-        except Exception as e:
-            logger.warning(f"Ranked path failed: {e}")
-
-    return {
-        "filename": file.filename,
-        "dish_count": len(dishes),
-        "ranked": False,
-        "restaurant_name": restaurant_name,
-        "cuisine_type": cuisine_type,
-        "dishes": dishes,
-    }
-
-
 # ── Streaming recommend — live logs via SSE ───────────────────────────────────
 
 class _SSELogHandler(logging.Handler):
@@ -1325,15 +1388,38 @@ class _SSELogHandler(logging.Handler):
 @app.post("/api/recommend/stream")
 async def recommend_stream(
     file: UploadFile = File(...),
-    user_id: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),   # legacy field, ignored; identity comes from the session
     restaurant_id: Optional[str] = Form(None),
+    current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     ct = file.content_type or ""
     if not (_is_image(ct) or _is_pdf(ct)):
         raise HTTPException(status_code=400, detail="File must be an image or PDF")
 
-    image_data = await file.read()
+    # Every scan is a billed Anthropic call, so this endpoint requires a session
+    # and guests get a small allowance. Identity always comes from the session
+    # cookie — the `user_id` form field is client-controlled and not trusted.
+    session_user = db.query(User).filter(User.id == _parse_uuid(current_user_id)).first()
+    if session_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    guest_id: str | None = None
+    if is_guest_username(session_user.username):
+        used = _guest_scans_used(db, session_user.id)
+        if used >= GUEST_SCAN_LIMIT:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Guest accounts can scan {GUEST_SCAN_LIMIT} menu"
+                    f"{'' if GUEST_SCAN_LIMIT == 1 else 's'}. "
+                    "Create a free account to keep scanning."
+                ),
+            )
+        guest_id = str(session_user.id)
+        _guest_scan_tally[guest_id] = used + 1
+
+    image_data = await _read_capped(file)
     filename   = file.filename
     is_pdf     = _is_pdf(ct)
 
@@ -1356,12 +1442,7 @@ async def recommend_stream(
 
         def run():
             try:
-                uid: uuid.UUID | None = None
-                if user_id:
-                    try:
-                        uid = uuid.UUID(user_id)
-                    except ValueError:
-                        pass
+                uid: uuid.UUID | None = session_user.id
 
                 _sse({"type": "log", "message": f"[Claude] Analyzing {filename}..."})
                 parsed          = parse_menu_pdf(image_data) if is_pdf else parse_menu_image(image_data)
@@ -1411,9 +1492,14 @@ async def recommend_stream(
                     "menu_id": str(new_menu.id) if new_menu else None,
                 }})
 
-            except Exception as exc:
+            except Exception:
                 logger.error(traceback.format_exc())
-                _sse({"type": "error", "message": str(exc)})
+                if guest_id:
+                    _guest_scan_tally[guest_id] = max(0, _guest_scan_tally.get(guest_id, 1) - 1)
+                _sse({
+                    "type": "error",
+                    "message": "Could not read that menu. Try a clearer photo or a different file.",
+                })
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 

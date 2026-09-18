@@ -244,7 +244,7 @@ function SideRail({ pendingCount }) {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 function HomePage() {
-  const { userId, username, pendingVisits, addPendingVisit } = useApp()
+  const { userId, displayName, pendingVisits, addPendingVisit, isGuest, guestScans, recordScan, upgrade } = useApp()
 
   const [stage, setStage] = useState('idle')
   const [selectedRestaurant, setSelectedRestaurant] = useState(null)
@@ -395,6 +395,7 @@ function HomePage() {
       const data = await rankRes.json()
       setResult(data)
       setStage('done')
+      if (isGuest) recordScan()
       recordVisit(restaurantName, cuisineType, selectedRestaurant?.id)
     } catch (err) {
       setError(err.message)
@@ -404,6 +405,7 @@ function HomePage() {
 
   // Results take the full width — no rail competing with the dish list.
   const isResults = stage === 'done' && result
+  const scansExhausted = isGuest && guestScans.limit > 0 && guestScans.used >= guestScans.limit
 
   const mainColumn = (
     <div>
@@ -507,11 +509,37 @@ function HomePage() {
               )}
             </div>
           )}
-          <Uploader
-            onFileSelect={handleFileUpload}
-            stage={stage === 'uploading' ? 'uploading' : 'idle'}
-            onReset={handleReset}
-          />
+          {scansExhausted ? (
+            <div className="card empty-state">
+              <div className="empty-state-glyph">🔒</div>
+              <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+                Guest scan used
+              </div>
+              <p className="text-sm" style={{ marginBottom: 18, maxWidth: 420, margin: '0 auto 18px' }}>
+                Guests get {guestScans.limit} menu scan{guestScans.limit === 1 ? '' : 's'} per session.
+                Create a free account to keep scanning — or pick a restaurant that already has a
+                menu on file and get recommendations from it.
+              </p>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button className="primary" onClick={upgrade}>Create an account</button>
+                <button onClick={handleReset}>Pick another restaurant</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Uploader
+                onFileSelect={handleFileUpload}
+                stage={stage === 'uploading' ? 'uploading' : 'idle'}
+                onReset={handleReset}
+              />
+              {isGuest && stage === 'ready_to_scan' && (
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginTop: 10, textAlign: 'center' }}>
+                  Guest session · {Math.max(0, guestScans.limit - guestScans.used)} of {guestScans.limit} scan
+                  {guestScans.limit === 1 ? '' : 's'} remaining
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -540,9 +568,15 @@ function HomePage() {
     <div className="container">
       <div className="page-head">
         <h1>
-          {username ? `Welcome back, ${username}` : 'MenuLens'}
+          {isGuest
+            ? 'Explore MenuLens'
+            : displayName ? `Welcome back, ${displayName}` : 'MenuLens'}
         </h1>
-        <p>Snap a menu, get dishes ranked against your taste profile.</p>
+        <p>
+          {isGuest
+            ? 'This account comes pre-filled with sample visits so every screen has something in it.'
+            : 'Snap a menu, get dishes ranked against your taste profile.'}
+        </p>
       </div>
 
       {isResults ? (

@@ -13,7 +13,7 @@ const NAV_ITEMS = [
   { to: '/stats',    label: 'Stats',    Icon: IconChart },
 ]
 
-function AvatarMenu({ username, onLogout }) {
+function AvatarMenu({ username, onLogout, isGuest }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const navigate = useNavigate()
@@ -37,16 +37,20 @@ function AvatarMenu({ username, onLogout }) {
   return (
     <div className="avatar-wrap" ref={ref}>
       <button className="avatar-btn" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
-        <span className="avatar">{username?.[0]?.toUpperCase() || '?'}</span>
-        <span className="avatar-name">{username}</span>
+        <span className="avatar">{isGuest ? 'G' : (username?.[0]?.toUpperCase() || '?')}</span>
+        <span className="avatar-name">{isGuest ? 'Guest' : username}</span>
         <IconChevronDown size={14} />
       </button>
 
       {open && (
         <div className="menu-popover" role="menu">
           <div className="menu-header">
-            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{username}</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>MenuLens member</div>
+            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+              {isGuest ? 'Guest session' : username}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              {isGuest ? 'Sample data · not saved' : 'MenuLens member'}
+            </div>
           </div>
           <button className="menu-item" onClick={() => go('/profile')}>
             <IconProfile /> Profile
@@ -56,7 +60,7 @@ function AvatarMenu({ username, onLogout }) {
           </button>
           <div style={{ height: 1, background: 'var(--border)', margin: '6px 0' }} />
           <button className="menu-item danger" onClick={() => { setOpen(false); onLogout() }}>
-            <IconLogout /> Log out
+            <IconLogout /> {isGuest ? 'End guest session' : 'Log out'}
           </button>
         </div>
       )}
@@ -64,7 +68,22 @@ function AvatarMenu({ username, onLogout }) {
   )
 }
 
-function AppLayout({ username, onLogout, pendingCount = 0 }) {
+function GuestBanner({ onUpgrade }) {
+  return (
+    <div className="guest-banner">
+      <div className="container guest-banner-inner">
+        <span className="guest-banner-text">
+          <strong>You're exploring as a guest.</strong>{' '}
+          This account is pre-filled with sample visits and ratings, and is deleted after 7 days.
+          Create a free account to keep what you log.
+        </span>
+        <button onClick={onUpgrade}>Create an account</button>
+      </div>
+    </div>
+  )
+}
+
+function AppLayout({ username, onLogout, pendingCount = 0, isGuest = false, onUpgrade }) {
   return (
     <>
       <header className="site-header">
@@ -89,9 +108,11 @@ function AppLayout({ username, onLogout, pendingCount = 0 }) {
             ))}
           </nav>
 
-          <AvatarMenu username={username} onLogout={onLogout} />
+          <AvatarMenu username={username} onLogout={onLogout} isGuest={isGuest} />
         </div>
       </header>
+
+      {isGuest && <GuestBanner onUpgrade={onUpgrade} />}
 
       <main className="page">
         <Outlet />

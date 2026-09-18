@@ -75,7 +75,7 @@ function CollectionDetail({ collection, onBack }) {
 }
 
 function ProfilePage() {
-  const { userId, username } = useApp()
+  const { userId, displayName, isGuest } = useApp()
   const [profile, setProfile] = useState(null)
   const [visits, setVisits] = useState([])
   const [loading, setLoading] = useState(true)
@@ -175,12 +175,12 @@ function ProfilePage() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '1.75rem', fontWeight: 700, flexShrink: 0,
         }}>
-          {username?.[0]?.toUpperCase()}
+          {displayName?.[0]?.toUpperCase()}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ marginBottom: 2 }}>{username}</h1>
+          <h1 style={{ marginBottom: 2 }}>{displayName}</h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            MenuLens member · {visits.length} visit{visits.length === 1 ? '' : 's'} · {allDishRatings.length} dish{allDishRatings.length === 1 ? '' : 'es'} rated
+            {isGuest ? 'Guest session' : 'MenuLens member'} · {visits.length} visit{visits.length === 1 ? '' : 's'} · {allDishRatings.length} dish{allDishRatings.length === 1 ? '' : 'es'} rated
           </p>
         </div>
         <Link to="/settings">

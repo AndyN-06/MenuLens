@@ -1,12 +1,25 @@
 import { useState } from 'react'
 import { apiFetch } from '../api'
 
-function Register({ onLogin, onBack }) {
+function Register({ onLogin, onBack, onGuest }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm,  setConfirm]  = useState('')
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState(null)
+  const [guestLoading, setGuestLoading] = useState(false)
+
+
+  const handleGuest = async () => {
+    setGuestLoading(true)
+    setError(null)
+    try {
+      await onGuest()
+    } catch (err) {
+      setError(err.message)
+      setGuestLoading(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -100,12 +113,28 @@ function Register({ onLogin, onBack }) {
             <button
               type="submit"
               className="primary"
-              disabled={loading || !username.trim() || !password || !confirm}
+              disabled={loading || guestLoading || !username.trim() || !password || !confirm}
               style={{ width: '100%' }}
             >
               {loading ? 'Creating account…' : 'Create account'}
             </button>
           </form>
+
+          <div className="or-divider"><span>or</span></div>
+
+          <button
+            type="button"
+            onClick={handleGuest}
+            disabled={loading || guestLoading}
+            className="block"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            {guestLoading ? 'Setting up…' : 'Continue as guest'}
+          </button>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: 8, textAlign: 'center' }}>
+            Explore the full app with sample data. No email, no password.
+          </p>
+
         </div>
 
         <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.875rem', color: 'var(--text-muted)' }}>

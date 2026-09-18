@@ -27,6 +27,8 @@ MenuLens/
     │   ├── requirements.txt
     │   └── app/
     │       ├── main.py       # FastAPI app + all API endpoints
+    │       ├── auth.py       # JWT + bcrypt, session cookie
+    │       ├── guest.py      # Guest accounts: seed fixtures, creation, purge
     │       ├── llm.py        # Claude API calls (menu parsing, taste summarization)
     │       ├── scoring.py    # Formula-based dish ranking against taste profile
     │       ├── models.py     # SQLAlchemy ORM models
@@ -146,11 +148,12 @@ npm run dev
 |--------|------|-------------|
 | GET | `/health` | Health check |
 | POST | `/api/login` | Username-based login / account creation |
+| POST | `/api/guest` | Create a seeded throwaway guest account |
 | GET | `/api/restaurants/search?q=` | Search restaurants by name |
 | POST | `/api/restaurants` | Create a new restaurant |
 | GET | `/api/restaurants/{id}/menu` | Get a restaurant's saved menu |
-| POST | `/api/recommend/stream` | Upload menu image/PDF → SSE stream → parsed dishes |
-| POST | `/api/recommend/rank` | Score + rank a dish list against a user's taste profile |
+| POST | `/api/recommend/stream` | Upload menu image/PDF → SSE stream → parsed dishes (auth) |
+| POST | `/api/recommend/rank` | Score + rank a dish list against the caller's taste profile (auth) |
 | GET | `/api/profile/{user_id}` | Get taste profile |
 | POST | `/api/profile/{user_id}` | Create / replace taste profile |
 | PATCH | `/api/profile/{user_id}` | Patch taste profile fields |
@@ -160,6 +163,49 @@ npm run dev
 | POST | `/api/visits/{user_id}/{visit_id}/dishes` | Rate dishes from a visit |
 | DELETE | `/api/visits/{user_id}/{visit_id}` | Delete a visit |
 | POST | `/api/import/excel` | Bulk import visits from Excel |
+
+## Security notes
+
+- **Secrets** live only in environment variables. `menulens/.env.example` documents every
+  one; the real `.env` files are gitignored and have never been committed. `JWT_SECRET` is
+  required — the backend refuses to start without it.
+- **Sessions** are JWTs in an `httponly` cookie. `ENVIRONMENT=production` is what enables
+  `Secure` and `SameSite=None`; leaving it unset in a deployed environment ships the
+  session cookie without the `Secure` flag, so set it.
+- **Every endpoint that calls the Anthropic API requires a session.** Menu scanning is the
+  only one, it is capped per guest, and uploads are limited to `MAX_UPLOAD_BYTES`
+  (10 MB default). Identity for scanning and ranking comes from the session cookie, never
+  from a client-supplied `user_id` field.
+- **Rate limits** are applied per IP to `/api/login`, `/api/register`, `/api/guest` and
+  `/health/llm`. The limiter is in-process, so it does not hold across replicas — move it
+  to Redis before scaling the backend horizontally.
+- **Login** returns one message for every failure so usernames cannot be enumerated.
+- **Public endpoints** are `/health`, `/api/login`, `/api/register`, `/api/guest`,
+  `/api/restaurants/search` and `GET /api/restaurants/{id}/menu`. The last two are
+  read-only views of shared restaurant data.
+
+## Guest accounts
+
+"Continue as guest" on the sign-in screen calls `POST /api/guest`, which creates a real
+`User` row with no password and seeds it with sample restaurants, visits, dish ratings
+and a taste profile — so Stats, Profile, My List and Collections have content to show.
+
+- **Identified** by a reserved `guest_` username prefix. `/api/register` rejects that
+  prefix, so real accounts can't collide with it. There is no `is_guest` column because
+  the project has no migration tooling and `create_all` would not add one to an existing
+  database.
+- **Isolated** — each click creates its own account, so visitors don't affect each other.
+- **Scan-limited** to `GUEST_SCAN_LIMIT` (currently 1) menu uploads per account, since
+  every scan is a billed Anthropic call. The limit keys off the session cookie, not the
+  `user_id` form field. A failed scan does not consume the allowance.
+- **Purged** after `GUEST_TTL_DAYS` (currently 7). Cleanup runs opportunistically when a
+  new guest is created, so no scheduler is needed. Only rows the guest owns are deleted;
+  restaurants, menus and dishes are shared, so a purged guest's scans are kept and merely
+  disowned.
+
+The seed fixtures live in `menulens/backend/app/guest.py`. They use invented restaurant
+names rather than real businesses, and each seeded restaurant gets a full menu — so a
+guest can hit "Get recommendations" and see the real ranking flow without spending a scan.
 
 ## Data Model
 

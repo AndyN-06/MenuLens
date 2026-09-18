@@ -36,6 +36,8 @@ function App() {
   const [stage,    setStage]    = useState('loading')
   const [userId,   setUserId]   = useState(null)
   const [username, setUsername] = useState(null)
+  const [isGuest,  setIsGuest]  = useState(false)
+  const [guestScans, setGuestScans] = useState({ used: 0, limit: 0 })
   const [pendingVisits, setPendingVisits] = useState([])
 
   useEffect(() => {
@@ -46,6 +48,8 @@ function App() {
         if (data?.user_id) {
           setUserId(data.user_id)
           setUsername(data.username)
+          setIsGuest(!!data.is_guest)
+          setGuestScans({ used: data.scans_used ?? 0, limit: data.scan_limit ?? 0 })
           setPendingVisits(loadPendingVisits(data.user_id))
           setStage(data.has_profile ? 'app' : 'onboarding')
         } else {
@@ -56,25 +60,53 @@ function App() {
   }, [])
 
   // ── Auth handlers ────────────────────────────────────────────────────────────
-  const handleLogin = ({ user_id, username: name, has_profile }) => {
+  const handleLogin = ({ user_id, username: name, has_profile, is_guest, scans_used, scan_limit }) => {
     // Clean up any legacy localStorage auth keys
     localStorage.removeItem('menulens_user_id')
     localStorage.removeItem('menulens_username')
     setUserId(user_id)
     setUsername(name)
+    setIsGuest(!!is_guest)
+    setGuestScans({ used: scans_used ?? 0, limit: scan_limit ?? 0 })
     setPendingVisits(loadPendingVisits(user_id))
     setStage(has_profile ? 'app' : 'onboarding')
   }
 
-  const handleLogout = async () => {
-    try { await apiFetch('/api/logout', { method: 'POST' }) } catch { /* ignore */ }
+  const handleGuestSignIn = async () => {
+    const res = await apiFetch('/api/guest', { method: 'POST' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || 'Could not start a guest session')
+    }
+    handleLogin(await res.json())
+  }
+
+  // A guest's pending visits are tied to a throwaway account — drop them so the
+  // next visitor on this browser doesn't inherit them.
+  const clearSession = (nextStage) => {
     localStorage.removeItem('menulens_user_id')
     localStorage.removeItem('menulens_username')
+    if (isGuest) localStorage.removeItem('menulens_pending_visits')
     setUserId(null)
     setUsername(null)
+    setIsGuest(false)
+    setGuestScans({ used: 0, limit: 0 })
     setPendingVisits([])
-    setStage('login')
+    setStage(nextStage)
   }
+
+  const handleLogout = async () => {
+    try { await apiFetch('/api/logout', { method: 'POST' }) } catch { /* ignore */ }
+    clearSession('login')
+  }
+
+  // Guest → sign-up: end the throwaway session and land on the register form.
+  const handleUpgrade = async () => {
+    try { await apiFetch('/api/logout', { method: 'POST' }) } catch { /* ignore */ }
+    clearSession('register')
+  }
+
+  const recordScan = () => setGuestScans(s => ({ ...s, used: s.used + 1 }))
 
   // ── Pending visit handlers ───────────────────────────────────────────────────
   const addPendingVisit = (visit) => {
@@ -121,11 +153,23 @@ function App() {
   }
 
   if (stage === 'login') {
-    return <Login onLogin={handleLogin} onRegister={() => setStage('register')} />
+    return (
+      <Login
+        onLogin={handleLogin}
+        onRegister={() => setStage('register')}
+        onGuest={handleGuestSignIn}
+      />
+    )
   }
 
   if (stage === 'register') {
-    return <Register onLogin={handleLogin} onBack={() => setStage('login')} />
+    return (
+      <Register
+        onLogin={handleLogin}
+        onBack={() => setStage('login')}
+        onGuest={handleGuestSignIn}
+      />
+    )
   }
 
   if (stage === 'onboarding') {
@@ -135,11 +179,17 @@ function App() {
   const ctx = {
     userId,
     username,
+    // Guest usernames are internal ids (guest_ab12cd34) — never show them.
+    displayName: isGuest ? 'Guest' : username,
+    isGuest,
+    guestScans,
+    recordScan,
     pendingVisits,
     addPendingVisit,
     saveVisit: handleSaveVisit,
     removePending: handleRemovePending,
     logout: handleLogout,
+    upgrade: handleUpgrade,
   }
 
   return (
@@ -152,6 +202,8 @@ function App() {
                 username={username}
                 onLogout={handleLogout}
                 pendingCount={pendingVisits.length}
+                isGuest={isGuest}
+                onUpgrade={handleUpgrade}
               />
             }
           >

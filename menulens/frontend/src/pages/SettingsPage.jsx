@@ -32,7 +32,7 @@ function SettingRow({ title, desc, children }) {
 }
 
 function SettingsPage() {
-  const { userId, username, logout } = useApp()
+  const { userId, displayName, logout, isGuest, upgrade } = useApp()
 
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -147,11 +147,25 @@ function SettingsPage() {
         <p>Account, taste preferences, and how MenuLens behaves.</p>
       </div>
 
+      {isGuest && (
+        <div className="card card-pad" style={{ marginBottom: 20, borderLeft: '3px solid var(--amber)' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>This is a guest account</div>
+          <p className="text-sm text-muted" style={{ marginBottom: 14 }}>
+            Changes here apply to a throwaway account that is deleted after 7 days. Create a free
+            account to keep your preferences and history.
+          </p>
+          <button className="primary sm" onClick={upgrade}>Create an account</button>
+        </div>
+      )}
+
       {/* Account */}
       <div className="card card-pad" style={{ marginBottom: 20 }}>
         <div className="section-label">Account</div>
-        <SettingRow title="Username" desc="How you appear across MenuLens.">
-          <span style={{ fontWeight: 600 }}>{username}</span>
+        <SettingRow
+          title="Username"
+          desc={isGuest ? 'Guests are assigned a temporary name.' : 'How you appear across MenuLens.'}
+        >
+          <span style={{ fontWeight: 600 }}>{displayName}</span>
         </SettingRow>
         <SettingRow title="Password" desc="Change it from your account provider.">
           <button className="sm" disabled>Change</button>
@@ -242,9 +256,15 @@ function SettingsPage() {
         <SettingRow title="Export visit history" desc="Download every visit and rating as JSON.">
           <button className="sm" disabled>Export</button>
         </SettingRow>
-        <SettingRow title="Delete account" desc="Permanently remove your profile and history.">
-          <button className="sm" disabled style={{ color: 'var(--red)' }}>Delete</button>
-        </SettingRow>
+        {isGuest ? (
+          <SettingRow title="Guest data" desc="This account and its sample data are removed automatically after 7 days.">
+            <span className="badge badge-muted">Auto-deleted</span>
+          </SettingRow>
+        ) : (
+          <SettingRow title="Delete account" desc="Permanently remove your profile and history.">
+            <button className="sm" disabled style={{ color: 'var(--red)' }}>Delete</button>
+          </SettingRow>
+        )}
       </div>
 
       <button
@@ -252,7 +272,7 @@ function SettingsPage() {
         className="block"
         style={{ color: 'var(--red)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
       >
-        <IconLogout size={16} /> Log out
+        <IconLogout size={16} /> {isGuest ? 'End guest session' : 'Log out'}
       </button>
     </div>
   )

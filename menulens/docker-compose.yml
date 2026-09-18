@@ -32,11 +32,15 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://menulens:menulens@db:5432/menulens
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      # Local-only dev secret. Production sets a real one in Railway.
+      - JWT_SECRET=${JWT_SECRET:-dev-only-insecure-secret-do-not-use-in-production}
+      - ENVIRONMENT=development
     depends_on:
       db:
         condition: service_healthy

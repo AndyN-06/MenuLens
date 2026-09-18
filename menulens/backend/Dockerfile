@@ -9,4 +9,8 @@ COPY menulens/backend/app/ ./app/
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# No --reload: it is a development convenience that watches the filesystem and
+# runs an extra supervisor process. Railway overrides this via startCommand, but
+# the image default should not be the dev server either.
+# For local development use docker-compose, which mounts the source and reloads.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

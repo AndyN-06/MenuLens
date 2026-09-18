@@ -49,7 +49,9 @@ menulens/uploads/
 
 # OS
 .DS_Store
+**/.DS_Store
 Thumbs.db
+desktop.ini
 
 # IDE
 .vscode/
@@ -60,7 +62,9 @@ Thumbs.db
 # Alembic
 menulens/backend/alembic/versions/*.pyc
 
-# Images
+# Sample menu images used for manual testing.
+# NOTE: Images/ is currently tracked on purpose (demo assets). This rule is
+# case-correct so a new lowercase images/ scratch folder stays out.
 images/
 
 # Docs (keep only README.md)
@@ -69,3 +73,20 @@ images/
 *.docx
 
 .claude/
+
+# Secrets / credentials — belt and braces on top of the .env rules above
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+credentials.json
+service-account*.json
+secrets.y*ml
+
+# Coverage / test output
+.coverage
+coverage/
+htmlcov/
+.tox/
+.nox/

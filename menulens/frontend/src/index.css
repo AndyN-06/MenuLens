@@ -821,5 +821,66 @@ input[type="range"]:focus { box-shadow: none; border-color: transparent; }
   .card-pad { padding: 1.25rem; }
 }
 
+/* "or" divider between auth options */
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 14px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.or-divider::before,
+.or-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background-color: var(--border);
+}
+
+/* Guest-mode banner under the header */
+.guest-banner {
+  background-color: var(--amber-tint);
+  border-bottom: 1px solid #f0e3c4;
+}
+
+.guest-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+
+.guest-banner-text {
+  flex: 1;
+  min-width: 260px;
+  font-size: 0.85rem;
+  color: var(--amber);
+  line-height: 1.45;
+}
+
+.guest-banner-text strong { font-weight: 700; }
+
+.guest-banner button {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.9rem;
+  background-color: var(--surface);
+  border-color: #e4d3ad;
+  color: var(--amber);
+}
+
+.guest-banner button:hover {
+  background-color: #fff;
+  border-color: var(--amber);
+}
+
+@media (max-width: 640px) {
+  .guest-banner-text { min-width: 0; }
+}
+
 /* Meal history rows inside a card */
 .history-row:last-child { border-bottom: none !important; }

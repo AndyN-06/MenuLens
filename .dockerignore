@@ -8,3 +8,16 @@ EasyOCR/.git
 EasyOCR/trainer
 EasyOCR/examples
 EasyOCR/unit_test
+
+# Secrets — the build context is the repo root, so exclude these explicitly
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+
+# Not needed in the image
+**/.DS_Store
+Images
+menulens design
+README.md
