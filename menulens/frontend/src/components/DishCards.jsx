@@ -15,13 +15,16 @@ function CommunityPill() {
 }
 
 function MatchPill({ level }) {
+  // Only positive matches get a pill. Low-scoring dishes are already grouped
+  // under the "Others" heading, and tagging each one "Skip" read harsher than
+  // intended — the match percentage on the right says it plainly enough.
   const config = {
     great: { label: 'Great match', cls: 'badge-green' },
     good:  { label: 'Good match',  cls: 'badge-teal'  },
-    skip:  { label: 'Skip',        cls: 'badge-muted'  },
   }
-  const { label, cls } = config[level] || config.skip
-  return <span className={`badge ${cls}`}>{label}</span>
+  const match = config[level]
+  if (!match) return null
+  return <span className={`badge ${match.cls}`}>{match.label}</span>
 }
 
 function ScoreDot({ score }) {
