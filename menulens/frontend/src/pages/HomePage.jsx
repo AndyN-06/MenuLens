@@ -7,7 +7,7 @@ import DishCards from '../components/DishCards'
 import RestaurantSearch from '../components/RestaurantSearch'
 import NewRestaurantForm from '../components/NewRestaurantForm'
 import LogMealForm from '../components/LogMealForm'
-import { IconImage, IconStar, IconClock, IconTrend } from '../components/icons'
+import { IconImage, IconStar, IconClock, IconTrend, IconMapPin } from '../components/icons'
 
 // ── Picked-for-you preview rows (static until the recommender runs off-menu) ──
 const PICKS = [
@@ -409,21 +409,9 @@ function HomePage() {
 
   const mainColumn = (
     <div>
-      {/* Search / entry point */}
+      {/* Search lives in the hero above; this column carries what follows it. */}
       {stage === 'idle' && (
         <div className="fade-in">
-          <div className="card card-pad" style={{ marginBottom: 24 }}>
-            <h2 style={{ marginBottom: 4 }}>Where are you eating?</h2>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: 16 }}>
-              Find the restaurant, then scan its menu or use one already on file.
-            </p>
-            <RestaurantSearch
-              onSelect={setSelectedRestaurant}
-              onCreateNew={handleInitNewRestaurant}
-              size="lg"
-            />
-          </div>
-
           {selectedRestaurant && !selectedRestaurant.has_menu && (
             <NoMenuCard
               restaurant={selectedRestaurant}
@@ -564,20 +552,59 @@ function HomePage() {
     </div>
   )
 
+  // The hero owns the page whenever the next action is "pick a restaurant".
+  const showHero = stage === 'idle' && !selectedRestaurant
+
   return (
     <div className="container">
-      <div className="page-head">
-        <h1>
-          {isGuest
-            ? 'Explore MenuLens'
-            : displayName ? `Welcome back, ${displayName}` : 'MenuLens'}
-        </h1>
-        <p>
-          {isGuest
-            ? 'This account comes pre-filled with sample visits so every screen has something in it.'
-            : 'Snap a menu, get dishes ranked against your taste profile.'}
-        </p>
-      </div>
+      {showHero ? (
+        <section className="search-hero fade-in">
+          <div className="search-hero-eyebrow">
+            {isGuest
+              ? 'Guest session · sample data'
+              : displayName ? `Welcome back, ${displayName}` : 'MenuLens'}
+          </div>
+
+          <h1>Where are you eating?</h1>
+          <p className="search-hero-sub">
+            Search a restaurant, scan its menu, and get every dish ranked against
+            your taste profile.
+          </p>
+
+          <div className="search-hero-field">
+            <RestaurantSearch
+              onSelect={setSelectedRestaurant}
+              onCreateNew={handleInitNewRestaurant}
+              size="hero"
+            />
+          </div>
+
+          <div className="search-hero-hints">
+            <span className="search-hero-hint">
+              <IconImage size={15} /> Photo or PDF
+            </span>
+            <span className="search-hero-hint">
+              <IconStar size={15} /> Ranked for your taste
+            </span>
+            <span className="search-hero-hint">
+              <IconMapPin size={15} /> Or add a new spot
+            </span>
+          </div>
+        </section>
+      ) : (
+        <div className="page-head">
+          <h1>
+            {isGuest
+              ? 'Explore MenuLens'
+              : displayName ? `Welcome back, ${displayName}` : 'MenuLens'}
+          </h1>
+          <p>
+            {isGuest
+              ? 'This account comes pre-filled with sample visits so every screen has something in it.'
+              : 'Snap a menu, get dishes ranked against your taste profile.'}
+          </p>
+        </div>
+      )}
 
       {isResults ? (
         mainColumn

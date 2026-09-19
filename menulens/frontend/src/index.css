@@ -882,5 +882,103 @@ input[type="range"]:focus { box-shadow: none; border-color: transparent; }
   .guest-banner-text { min-width: 0; }
 }
 
+/* Home hero — restaurant search is the app's primary action, so it gets the
+   full container width and the page's only h1 on the idle screen. */
+.search-hero {
+  position: relative;
+  background:
+    radial-gradient(130% 150% at 50% 0%, var(--green-tint) 0%, rgba(232, 245, 238, 0) 68%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 56px 40px 48px;
+  margin-bottom: 28px;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.search-hero-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 14px;
+}
+
+.search-hero h1 {
+  font-size: 2.5rem;
+  letter-spacing: -0.035em;
+  margin-bottom: 10px;
+}
+
+.search-hero-sub {
+  font-size: 1.0625rem;
+  color: var(--text-muted);
+  max-width: 540px;
+  margin: 0 auto 28px;
+}
+
+/* The dropdown is absolutely positioned inside this, so it must stay
+   left-aligned and above the sections below. */
+.search-hero-field {
+  position: relative;
+  z-index: 20;
+  max-width: 600px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.search-hero-hints {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.search-hero-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.search-hero-hint svg { color: var(--text-dim); flex-shrink: 0; }
+
+/* Hero-sized search input */
+.input-hero {
+  font-size: 1.0625rem;
+  padding: 1.05rem 1.25rem 1.05rem 3.1rem;
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.input-hero:focus {
+  box-shadow: 0 0 0 4px rgba(26, 92, 54, 0.12);
+}
+
+.search-hero-icon {
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  display: flex;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@media (max-width: 640px) {
+  .search-hero { padding: 36px 20px 32px; border-radius: var(--radius-lg); }
+  .search-hero h1 { font-size: 1.75rem; }
+  .search-hero-sub { font-size: 0.9375rem; margin-bottom: 22px; }
+  .search-hero-hints { gap: 14px; font-size: 0.8rem; }
+  .input-hero { font-size: 1rem; padding: 0.9rem 1rem 0.9rem 2.85rem; }
+  .search-hero-icon { left: 14px; }
+}
+
 /* Meal history rows inside a card */
 .history-row:last-child { border-bottom: none !important; }

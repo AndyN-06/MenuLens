@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { apiUrl } from '../api'
+import { IconSearch } from './icons'
 
 function RestaurantSearch({ onSelect, onCreateNew, disabled, size }) {
   const [query, setQuery]     = useState('')
@@ -72,6 +73,9 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled, size }) {
     <div ref={containerRef} style={{ position: 'relative' }}>
       {/* Search input */}
       <div style={{ position: 'relative' }}>
+        {size === 'hero' && (
+          <span className="search-hero-icon"><IconSearch size={19} /></span>
+        )}
         <input
           type="text"
           value={query}
@@ -80,7 +84,7 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled, size }) {
           placeholder="Search for a restaurant…"
           disabled={disabled}
           autoComplete="off"
-          className={size === 'lg' ? 'input-lg' : undefined}
+          className={size === 'hero' ? 'input-hero' : size === 'lg' ? 'input-lg' : undefined}
           style={{
             width: '100%',
             paddingRight: loading ? '2.5rem' : undefined,
@@ -104,8 +108,8 @@ function RestaurantSearch({ onSelect, onCreateNew, disabled, size }) {
           left: 0, right: 0,
           background: 'var(--surface)',
           border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
+          borderRadius: size === 'hero' ? '14px' : 'var(--radius)',
+          boxShadow: '0 8px 28px rgba(0,0,0,0.12)',
           zIndex: 200,
           overflow: 'hidden',
           maxHeight: '380px',
