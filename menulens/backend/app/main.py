@@ -572,9 +572,14 @@ def recompute_profile(db: Session, user_id: uuid.UUID) -> TasteProfile:
     for dr in dish_ratings_rows:
         if not dr.dish or not dr.dish.flavor_vector or dr.dish.flavor_confidence == 0:
             continue
+        # Lowercased to match how score_dishes looks this up (`cuisine_type.lower()`)
+        # and the schema documented on TasteProfile.cuisine_profiles. Stored
+        # capitalised, every tier-1/tier-2 pref_vector lookup missed and scoring
+        # silently fell through to the global cross-cuisine average.
         cuisine = (
             dr.dish.restaurant.cuisine_type if dr.dish.restaurant else None
         ) or "unknown"
+        cuisine   = cuisine.lower()
         section   = (dr.dish.section or "mains").lower()
         direction = 1 if dr.rating >= 7 else (-1 if dr.rating <= 4 else 0)
         if direction == 0:
@@ -782,7 +787,10 @@ def create_guest(request: Request, db: Session = Depends(get_db)):
         db.rollback()
 
     user = create_guest_user(db)
-    db.commit()
+    # Derive the taste profile from the seeded ratings via the same path a real
+    # user's profile takes, so the guest's cuisine_profiles and ingredient maps
+    # are consistent with their visit history rather than hand-written. Commits.
+    recompute_profile(db, user.id)
     db.refresh(user)
     logger.info("[guest] created %s", user.username)
     return _auth_response(user, db)
